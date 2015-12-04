@@ -1,0 +1,175 @@
+
+
+// Include the lists and bags library.
+#include "library-bags.fz"
+
+/* Also include cpp for trees */
+
+#define tree(A)       (mu YY => (bool + (A, (YY,YY))))
+#define leafT(A)      (fold[tree(A)] (inl@[bool]@[(A, (tree(A), tree(A)))] true))
+#define leafF(A)      (fold[tree(A)] (inl@[bool]@[(A, (tree(A), tree(A)))] false))
+#define node(A,p,l,r) (fold[tree(A)] (inr@[bool]@[(A, (tree(A), tree(A)))] (p,(l,r))))
+
+typedef delta = num;
+typedef epsilon = num;
+typedef boollist = list(bool);
+typedef db = boollist bag;
+typedef numtree = tree(num);
+
+
+/*
+A database row is a list of bools.  The 0-indexed value is 
+the label, and the parameters are indexed 1 through k.
+We need a function to make all the possible trees.
+There will be k*(number of leaves) possible trees.
+This will be some sort of concatmap over a fold.
+*/
+
+primitive execInRedZone
+  forall(A)
+  (foo : db -o fuzzy A) : (string + (A, (delta, epsilon))) { "execInRedZone" }
+
+// A stub for the exponential function, which is actually
+// already in Fuzz ...
+primitive expFuzz
+  forall(A,B)
+  (foo : A -> (B bag) -o fuzzy num) (rs : A bag) (db :[] B bag) : fuzzy A
+{ "expfuzz" }
+
+
+// runTree takes a row of parameters and a tree and returns the 
+// value that the tree predicts for this row.
+// runTree : list(bool) -o tree -> bool
+function runTree
+  (row :[] boollist)
+  (t : numtree)
+  : bool
+  {
+    case unfold t of : {
+      inl(b) => b
+    | inr(u) => let (p,ts) = u;
+                let (b,row') = index@[bool] false p row;
+                let (t1,t2) = ts;
+                if b then [bool]
+                       { runTree row' t1 }
+                  else { runTree row' t2 }
+//                runTree row' (if b then [numtree] { t1 } else { t2 })
+    }
+  }
+
+
+// testTree takes a set of rows and a tree and returns the number of 
+// times the tree correctly predicts the label for a row.
+// testTree : db -o tree -> Circle num
+function testTree
+  (bagtime : num)
+  (t : numtree)
+  (db :[] db)
+  : fuzzy num
+  {
+    let (suc,fail) = bagsplit@[boollist]
+        (fun (row :[] boollist) : bool {
+            let (b,row') = index false 0.0 row;
+            runTree row' t == b }) 100.0 db;
+    return (bagsize@[boollist] suc)
+  }
+
+
+// chooseBestTree finds the best tree among those provided
+// so long as it's better than the base tree's error adjusted 
+// by the user provided function.
+// chooseBestTree : tree -> (num -> num) -> list(tree) -> db -o Circle (1 + tree)
+function chooseBestTree
+  (t : numtree)             // the base tree
+  (cutoffMod : num -> num)  // the amount of error to beat
+  (trees : numtree bag)     // the input trees
+  (bagtime : num)           // the number of steps we use during bagsplit
+  (db :[] db)               // the database
+  : fuzzy numtree           // new tree
+  {
+    test : = fun (t' : numtree) { fun (d :[] db) : fuzzy num {
+                  sample score = testTree bagtime t' d;
+                  if t == t' then [fuzzy num] { return (cutoffMod score) }
+                             else { return score } } };
+    expFuzz@[numtree]@[boollist] test (addtobag@[numtree] t trees) db
+  }
+
+
+// A function to return a list of nums [k .. 1]
+function listNums (k : num) : list(num) {
+  if (k <= 0.0) then [list(num)] { nil(num) }
+                else { cons(num, k, listNums (k - 1.0)) }
+}
+
+// makeTrees takes a list of unused parameters (initially [1..k])
+// and a tree and constructs a list of all possible trees that are 
+// have exactly one more node.
+function makeTrees
+  (params : list(num))
+  (t : numtree)
+  : numtree bag
+  {
+    case (unfold t) of : {
+      inl(b) => list_foldl@[numtree bag]@[numtree bag] 
+                  bagjoin@[numtree] (emptybag@[numtree] ())
+        (list_map@[num]@[numtree bag] (fun (p : num) : (numtree bag) {
+            addtobag@[numtree] node(num, p, leafT(num), leafF(num))
+              (addtobag@[numtree] node(num, p, leafF(num), leafT(num))
+                (emptybag@[numtree] ())) } )
+            params)
+    | inr(u) => let (p,ts) = u;
+                let (t1,t2) = ts;
+                params' : = remove@[num] p params;
+                bagjoin@[numtree] 
+                  (bagmapins@[numtree]@[numtree] (fun (t : numtree) : numtree {
+                    node(num, p, t, t2) }) (makeTrees params' t1))
+                  (bagmapins@[numtree]@[numtree] (fun (t : numtree) : numtree {
+                    node(num, p, t1, t) }) (makeTrees params' t2))
+    }
+  }
+
+
+function generateDecisionTreeHelper
+  (k : num)
+  (evalFun : num -> num -> num -> num -> num) //perhaps the last one should be -o?
+  (delta : num)
+  (epsilon : num)
+  (t : numtree)
+  : numtree
+  {
+    trees : = makeTrees (listNums k) t;
+    myfun : = fun (x : num) : num { evalFun (bagsize@[numtree] trees) delta epsilon x };
+    rz : = execInRedZone@[numtree] (chooseBestTree t myfun trees 100.0);
+    case rz of : {
+      inl(unit) => t
+    | inr(result) =>
+        let (t',de) = result;
+        let (d,e) = de;
+        if (t == t') then [numtree] { t' }
+                     else { generateDecisionTreeHelper k evalFun d e t' }
+    }
+  }
+
+
+// This green zone function calls chooseBestTree until a desired metric 
+// is reached.
+function generateDecisionTree
+  (k : num)
+  (evalFun : num -> num -> num -> num -> num) //perhaps the last one should be -o?
+        //  length trees -> delta -> epsilon -> base tree score -> modified tree score
+  : numtree
+  { generateDecisionTreeHelper k evalFun 0.0 0.0 leafT(num) }
+
+
+
+
+
+function myeval (len : num) (delta : num) (eps : num) (bs : num) : num {
+  bs }
+
+function main (db :[] db) : fuzzy string {
+  t : = generateDecisionTree 2.0 myeval;
+  return ("printTree")
+}
+
+main

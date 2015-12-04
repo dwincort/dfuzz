@@ -204,3 +204,5 @@ val tmInfo : term -> info
 (* tm[t/x] *)
 val term_ty_subst : int -> ty -> term -> term
 val term_si_subst : int -> si -> term -> term
+
+val ty_unfold : ty -> ty

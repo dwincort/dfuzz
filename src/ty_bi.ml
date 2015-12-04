@@ -198,8 +198,8 @@ module TypeSub = struct
       check_sens_leq i sir sil
 
     | TyMu(_bl, tyl), TyMu(_br, tyr) ->
-      (* Recursive types disabled for now *)
-      fail
+      (* fun _ -> Left { i = i; v = Internal "Recursive types disabled for now" } *)
+      check_type_sub i tyl tyr
 
     | TyForall(bl, kl, tyl), TyForall(_br, kr, tyr) ->
       if kl = kr then
@@ -306,7 +306,7 @@ module TypeSub = struct
 
   let check_mu_shape i ty =
     match ty with
-    | TyMu(_, _)          -> typing_error i "Iso-recursive types disabled for now"
+    | TyMu(_, _)          -> return (ty_unfold ty)
     | _                   -> fail i @@ WrongShape (ty, "mu")
 
 end
@@ -439,7 +439,7 @@ let rec type_of (t : term) : (ty * bsi list) checker  =
 
     with_extended_ctx i b_x.b_name tya_x (type_of tm) >>= fun (ty_tm, si_x, sis) ->
 
-    ty_debug (tmInfo t) "### [%3d] Inferred sensitivity for binder @[%a@] is @[%a@]" !ty_seq P.pp_binfo b_x P.pp_si (si_of_bsi si_x);
+    ty_debug (tmInfo t) "### Inferred sensitivity for binder @[%a@] is @[%a@]" P.pp_binfo b_x P.pp_si (si_of_bsi si_x);
 
     check_type_ann i otya_tm ty_tm                    >>
       check_sens_leq i (si_of_bsi si_x) sia_x         >>
@@ -468,11 +468,12 @@ let rec type_of (t : term) : (ty * bsi list) checker  =
 
     type_of tm_x >>= fun (ty_x, sis_x)  ->
 
-    ty_info2 i "### Type of binder %a is %a" Print.pp_binfo x Print.pp_type ty_x;
+    ty_debug i "### Type of binder %a is %a" Print.pp_binfo x Print.pp_type ty_x;
 
     with_extended_ctx i x.b_name ty_x (type_of e) >>= fun (ty_e, si_x, sis_e) ->
+    ty_debug i "### Inferred sensitivity for binder @[%a@] is @[%a@]" P.pp_binfo x P.pp_si (si_of_bsi si_x);
     check_sens_leq i (si_of_bsi si_x) sia_x                 >>
-      return (ty_e, add_sens sis_e (scale_sens si_x sis_x))
+    return (ty_e, add_sens sis_e (scale_sens si_x sis_x))
 
   | TmLetRec(i, x, tya_x, tm_x, e)                      ->
 
@@ -488,7 +489,7 @@ let rec type_of (t : term) : (ty * bsi list) checker  =
        context by ∞ anyway... *)
       with_extended_ctx i x.b_name tya_x (type_of e) >>= fun (ty_e, si_x', sis_e) ->
 
-    ty_info2 i "### Type of binder %a is %a" Print.pp_binfo x Print.pp_type ty_x;
+    ty_debug i "### Type of binder %a is %a" Print.pp_binfo x Print.pp_type ty_x;
     return (ty_e, add_sens sis_e (scale_sens (mult_bsi (Some si_infty) si_x') sis_x))
 
   | TmSample(i, b_x, tm_x, e)                              ->
@@ -518,10 +519,18 @@ let rec type_of (t : term) : (ty * bsi list) checker  =
   (************************************************************)
   (* Data type manipulation *)
   | TmFold(i, ty, tm)               ->
-    fail i @@ Internal "Not implemented: fold"
+
+    check_mu_shape i ty             >>= fun ty_unf ->
+    type_of tm                      >>= fun (ty_tm, sis_tm) ->
+    check_type_sub i ty_unf ty_tm   >>
+    check_type_sub i ty_tm ty_unf   >>
+    return (ty, sis_tm)
 
   | TmUnfold (i, tm)                ->
-    fail i @@ Internal "Not implemented: unfold"
+
+    type_of tm                      >>= fun (ty_tm, sis_tm) ->
+    check_mu_shape i ty_tm          >>= fun ty_unf ->
+    return (ty_unf, sis_tm)
 
   (* Aliases *)
   | TmTypedef(i, n, tdef_ty, tm)    ->
@@ -550,6 +559,8 @@ let rec type_of (t : term) : (ty * bsi list) checker  =
 
     let si_x = si_of_bsi si_x in
     let si_y = si_of_bsi si_y in
+    ty_debug (tmInfo t) "### Inferred sensitivity for binder @[%a@] is @[%a@]" P.pp_binfo x P.pp_si si_x;
+    ty_debug (tmInfo t) "### Inferred sensitivity for binder @[%a@] is @[%a@]" P.pp_binfo y P.pp_si si_y;
 
     return (ty_t, add_sens sis_t (scale_sens (Some (SiLub (si_x, si_y))) sis_e))
 
@@ -570,22 +581,23 @@ let rec type_of (t : term) : (ty * bsi list) checker  =
      could check that both are equal (i.e., t1 <= t2 and t2 <= t1),
      but the resultning typing rule would be too restrictive, no? *)
 
-  | TmUnionCase(i, e, sia_e, ty, b_x, e_l, b_y, e_r)      ->
+  | TmUnionCase(i, e, sia_e, _ty, b_x, e_l, b_y, e_r)      ->
 
     type_of e >>= fun (ty_e, sis_e) ->
 
     check_union_shape i ty_e >>= fun (ty1, ty2) ->
 
     with_extended_ctx i b_x.b_name ty1 (type_of e_l) >>= fun (tyl, si_x, sis_l) ->
-    check_type_sub i tyl ty >>
+    with_extended_ctx i b_y.b_name ty2 (type_of e_r) >>= fun (tyr, si_y, sis_r) ->
+    check_type_sub i tyr tyl >>
+    check_type_sub i tyl tyr >>
 
-      with_extended_ctx i b_y.b_name ty2 (type_of e_r) >>= fun (tyr, si_y, sis_r) ->
-    check_type_sub i tyr ty >>
+    let si_x = si_of_bsi si_x in
+    let si_y = si_of_bsi si_y in
+    ty_debug (tmInfo t) "### Inferred sensitivity for binder @[%a@] is @[%a@]" P.pp_binfo b_x P.pp_si si_x;
+    ty_debug (tmInfo t) "### Inferred sensitivity for binder @[%a@] is @[%a@]" P.pp_binfo b_y P.pp_si si_y;
 
-      let si_x = si_of_bsi si_x in
-      let si_y = si_of_bsi si_y in
-
-      return (ty, add_sens (lub_sens sis_l sis_r) (scale_sens (Some (SiLub (si_x, si_y))) sis_e))
+    return (tyl, add_sens (lub_sens sis_l sis_r) (scale_sens (Some (SiLub (si_x, si_y))) sis_e))
 
   (* Type/Sensitivity Abstraction and Application *)
   | TmTyAbs(i, bi, ki, tm) ->

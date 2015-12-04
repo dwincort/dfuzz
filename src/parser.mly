@@ -238,7 +238,7 @@ Term :
   | TYPEDEF ID EQUAL Type SEMI Term
       {
         fun ctx ->
-        TmTypedef($1, (nb_tyvar $2.v), $4 ctx, $6 (extend_ty_var $2.v Star ctx))
+        TmTypedef($1, (nb_tyvar $2.v), $4 (extend_ty_var $2.v Star ctx), $6 (extend_ty_var $2.v Star ctx))
       }
   | PRIMITIVE ID Quantifiers Arguments COLON Type LBRACE PrimSpec RBRACE Term
       { fun ctx ->
@@ -260,19 +260,6 @@ Term :
 
         TmLetRec($2.i, nb_var $2.v, f_type, f_term, $10 ctx_let)
       }
-/*
-  | UNPACK SIZE LPAREN ID COMMA ID RPAREN EQUAL Expr SEMI Term
-      { fun ctx ->
-        let ctx' = extend_var $4.v ctx in
-        let ctx'' = extend_ty_var $6.v Size ctx' in
-        TmUnpack($1, nb_var $4.v, nb_tyvar $6.v, $9 ctx, $11 ctx'') }
-
-  | UNPACK SENS LPAREN ID COMMA ID RPAREN EQUAL Expr SEMI Term
-      { fun ctx ->
-        let ctx' = extend_var $4.v ctx in
-        let ctx'' = extend_ty_var $6.v Sens ctx' in
-        TmUnpack($1, nb_var $4.v, nb_tyvar $6.v, $9 ctx, $11 ctx'') }
-*/
   | LogOrTerm
       { $1 }
 
@@ -366,16 +353,10 @@ STerm :
         let if_then_spec = mk_prim_ty_app ctx $1 "if_then_else" [$5 ctx] in
         let arg_list    = [$2 ctx;
                            TmAmpersand($6,
-                                       mk_lambda $7  (nb_var "thunk") (si_one, TyPrim PrimUnit) ($8  (extend_var "_" ctx)),
-                                       mk_lambda $11 (nb_var "thunk") (si_one, TyPrim PrimUnit) ($12 (extend_var "_" ctx)));] in
+                                       mk_lambda $7  (nb_var "thunkThen") (si_one, TyPrim PrimUnit) ($8  (extend_var "_" ctx)),
+                                       mk_lambda $11 (nb_var "thunkElse") (si_one, TyPrim PrimUnit) ($12 (extend_var "_" ctx)));] in
         mk_prim_app_args $1 if_then_spec (List.rev arg_list)
       }
-
-/*  | PACK SIZE Expr WITH SizeTerm FOR ID IN Type
-      { fun ctx ->
-        let ctx' = extend_ty_var $7.v Size ctx in
-        TmPack($1, $3 ctx, $5 ctx, TyExistsSize (nb_tyvar $7.v, $9 ctx')) }
-*/
 
   /* Fixme: Reflect type */
   /* Fixme: Read return annotation */
@@ -386,20 +367,6 @@ STerm :
         let ctx_r = extend_var $15.v ctx in
         TmUnionCase($1, $2 ctx, $4 ctx, dummy_ty, nb_var $8.v, $11 ctx_l, nb_var  $15.v, $18 ctx_r) }
 
-  | LISTCASE Expr OF Type LBRACE LBRACK RBRACK DBLARROW Term PIPE ID DBLCOLON ID LBRACK ID RBRACK DBLARROW Term RBRACE
-      { fun ctx ->
-        let ctx_l  = extend_var    $11.v      ctx    in
-        let ctx_ll = extend_var    $13.v      ctx_l  in
-        let ctx_si = extend_ty_var $15.v Sens ctx_ll in
-        TmListCase($1, $2 ctx, $4 ctx, $9 ctx, nb_var $11.v, nb_var $13.v, nb_var $15.v, $18 ctx_si) }
-
-  | NUMCASE Expr OF Type LBRACE ZERO DBLARROW Term PIPE SUCC ID LBRACK ID RBRACK DBLARROW Term RBRACE
-      { fun ctx ->
-        (* Todo: here we could guess more of dependent type *)
-        let ctx_n = extend_var    $11.v      ctx   in
-        let ctx_s = extend_ty_var $13.v Size ctx_n in
-        TmNatCase($1, $2 ctx, $4 ctx, $8 ctx, nb_var $11.v, nb_tyvar $13.v, $16 ctx_s)
-      }
   | FUN LPAREN ID SensType RPAREN MaybeType LBRACE Term RBRACE
       { fun ctx -> TmAbs($1, nb_var $3.v, $4 ctx, $6 ctx, $8 (extend_var $3.v ctx )) }
   | FExpr
@@ -578,8 +545,6 @@ ComplexType :
       { fun ctx -> TyLollipop($1 ctx, $4 ctx, $6 ctx) }
   | FUZZY Type
       { fun ctx -> TyPrim1 (Prim1Fuzzy, ($2 ctx)) }
-  | LIST LPAREN Type RPAREN LBRACK SizeTerm RBRACK
-      { fun ctx -> TyList($3 ctx, $6 ctx) }
   | AType
       { $1 }
 

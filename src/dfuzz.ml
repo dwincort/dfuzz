@@ -73,7 +73,7 @@ let check_main_type ty =
   | TyLollipop (TyPrim PrimDBS, _, TyPrim1 (Prim1Fuzzy, TyPrim PrimString)) -> ()
   | _ -> main_error dp "The type of the program must the db_source -o[?] fuzzy string"
 
-module WS = WhySolver
+(* module WS = WhySolver *)
 
 let type_check program =
   let ty = Ty_bi.get_type program  in
@@ -83,7 +83,7 @@ let type_check program =
   main_info  dp "CS: @[<v>%a@]" (Print.pp_list Print.pp_cs) cs;
 
   (* let res = WS.send_smt (List.hd (List.tl cs)) in *)
-  let res = List.map WS.send_smt cs in
+  (* let res = List.map WS.send_smt cs in *)
   ()
 
   (* Disabled as we don't run the programs for now *)
@@ -154,3 +154,4 @@ let res =
       0
   with Exit x -> x
 let () = exit res
+

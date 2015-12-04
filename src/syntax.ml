@@ -217,6 +217,10 @@ let ty_si_subst x si ty =
   let f_ty k v  = TyVar (var_shift (x + k) (-1) v)       in
   ty_map 0 f_ty f_si ty
 
+let ty_unfold ty = match ty with
+  | TyMu(b, ty_i) -> ty_subst 0 (TyMu (b, ty_i)) ty_i
+  | _             -> ty
+
 (*********************************************************************)
 (* Terms                                                             *)
 
@@ -353,8 +357,8 @@ let rec map_term_ty_aux n ft fsi tm =
     TmUnfold(i, tf n tm)
 
   (* Type Binder! *)
-  | TmTypedef(i, bi,      ty,          tm)        ->
-    TmTypedef(i, bi, ft n ty, tf (n+1) tm)
+  | TmTypedef(i, bi,          ty,          tm)        ->
+    TmTypedef(i, bi, ft (n+1) ty, tf (n+1) tm)
 
   (* Dependent stuff *)
   | TmListCase(i,      tm,      ty,      tm_l, bi_x, bi_xs, bi_si,      tm_r) ->
@@ -388,7 +392,7 @@ let map_term_ty fty fsi tm = map_term_ty_aux 0 fty fsi tm
 
 (* tm[t/x] *)
 let term_ty_subst x t tm =
-  let tsub  k = ty_subst (x+k) t in
+  let tsub  k = ty_subst (x+k) (ty_shift 0 (k-1) t) in
   let sisub k = si_shift k (-1)  in
   map_term_ty tsub sisub tm
 

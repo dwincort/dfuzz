@@ -92,15 +92,12 @@ module Decide = struct
     si = SiInfty
 
   (* We should also decide constants, etc... *)
-  let decide_leq sil sir =
-    if sil = sir then
-      Some true
-    else if is_zero sil then
-      Some true
-    else if is_infty sir then
-      Some true
-    else
-      None
+  let decide_leq sil sir = match sil, sir with
+    | SiZero, _ -> Some true
+    | SiConst 0.0, _ -> Some true
+    | _, SiInfty -> Some true
+    | SiConst l, SiConst r -> Some (l <= r)
+    | _, _ -> if sil = sir then Some true else None
 end
 
 module Simpl = struct
@@ -111,31 +108,47 @@ module Simpl = struct
       let si2' = si_simpl si2 in
       begin
         match si1', si2' with
-	(* | SiConst x, SiConst y -> SiConst (si_add x y) *)
-	| _, _                 -> SiAdd (si1', si2')
+        | SiInfty, _            -> SiInfty
+        | _, SiInfty            -> SiInfty
+        | SiConst x, SiConst y  -> SiConst (x +. y)
+        | _, _                  -> SiAdd (si1', si2')
       end
     | SiMult(si1, si2) ->
       let si1' = si_simpl si1 in
       let si2' = si_simpl si2 in
       begin
         match si1', si2' with
-	| SiConst 1.0,   y
-	| SiSucc SiZero, y -> y
-	| x, SiConst 1.0
-	| x, SiSucc SiZero -> x
-	| _, _             -> SiMult (si1', si2')
+        | SiConst 1.0,   y
+        | SiSucc SiZero, y      -> y
+        | x, SiConst 1.0
+        | x, SiSucc SiZero      -> x
+        | SiConst x, SiConst y  -> SiConst (x *. y)
+        | _, _                  -> SiMult (si1', si2')
       end
     | SiLub(si1, si2) ->
       let si1' = si_simpl si1 in
       let si2' = si_simpl si2 in
-      SiLub(si1', si2')
-
+      begin
+        match si1', si2' with
+        | SiInfty, _            -> SiInfty
+        | _, SiInfty            -> SiInfty
+        | SiConst x, SiConst y  -> SiConst (if x > y then x else y)
+        | _, _                  -> SiLub(si1', si2')
+      end
+    | SiSucc(sis) ->
+      let sis' = si_simpl sis in
+      begin
+        match sis' with
+        | SiZero -> SiConst 1.0
+        | SiConst x -> SiConst (x +. 1.0)
+        | SiInfty -> SiInfty
+        | _ -> SiSucc sis'
+      end
     | SiCase(si, zsi, b, ssi) ->
       let si'  = si_simpl si  in
       let zsi' = si_simpl zsi in
       let ssi' = si_simpl ssi in
       SiCase(si', zsi', b, ssi')
-
     | _ -> si
 end
 
@@ -213,15 +226,15 @@ end
 (* TODO: This code is not doing any real checking yet *)
 let add_cs cs =
   match Decide.decide_leq cs.c_lower cs.c_upper with
-  | Some res -> ()
+  | Some res -> res
   | _        -> let cs = Optimize.leq_simplify cs in
-                cs_store := cs @ !cs_store
+                cs_store := cs @ !cs_store;
+                false
 
 let post_si_leq i (ctx : context) (sil : si) (sir : si) : bool =
   let sil = Simpl.si_simpl sil in
   let sir = Simpl.si_simpl sir in
-  add_cs (mk_constr_leq i ctx sil sir) ;
-  true
+  add_cs (mk_constr_leq i ctx sil sir)
 
 let post_si_eq  i (ctx : context) (sil : si) (sir : si) : bool =
   post_si_leq i ctx sil sir &&

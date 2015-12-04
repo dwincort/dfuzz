@@ -1,0 +1,228 @@
+////////////////////////////////////////////////////////////////
+/* Regular list definitions using CPP */
+
+#define list(A)     (mu XX => (() + (A, XX)))
+#define nil(A)      (fold[list(A)] (inl@[()]@[(A,list(A))] ()))
+#define cons(A,a,b) (fold[list(A)] (inr@[()]@[(A,list(A))] (a,b)))
+
+
+// map : (X -> Y) -> list(X) -> list(Y)
+
+function list_map forall(X, Y) (f : X -> Y) (l : list(X)) : list(Y) {
+  case unfold l of : {
+      inl(x) => nil(Y)
+    | inr(x) => let (h,t) = x;
+                cons(Y, f h, list_map@[X]@[Y] f t)
+  }
+}
+
+// lmap : (X -o Y) -> list(X) -o list(Y)
+
+function list_lmap forall (X, Y) (f : X -o Y) (l :[] list(X)) : list(Y) {
+  case unfold l of : {
+      inl(x) => nil(Y)
+    | inr(x) => let (h,t) = x;
+                cons(Y, f h, list_lmap@[X]@[Y] f t)
+  }
+}
+
+// fold : (B -o (A ->  B)) -> B -o list(A) -> B
+
+function list_foldl forall (A, B) (f : (B -o (A -> B))) (ac :[] B) (il : list(A)) : B {
+  case unfold il of : {
+     inl(y) => ac
+   | inr(y) => let (elem,rest) = y;
+               list_foldl@[A]@[B] f (f ac elem) rest
+  }
+}
+
+// lfold : (B -o (A -o  B)) -> B -o list(A) -> B
+
+function list_lfoldl forall (A, B) (f : (B -o (A -o B))) (ac :[] B) (il :[] list(A)) : B {
+  case unfold il of : {
+     inl(y) => ac
+   | inr(y) => let (elem,rest) = y;
+               list_lfoldl@[A]@[B] f (f ac elem) rest
+  }
+}
+
+// length : list(A) -> num
+
+function length forall (A) (x :[] list(A)) : num {
+  list_lfoldl@[A]@[num] (fun (y :[] num) { fun (l :[] A ) { y + 1.0 } }) 0.0 x
+}
+
+// head : list(num) -> num
+
+/*
+   returns 0 for empty list of nums
+   EG: ????
+*/
+
+function head (il : list(num)) : num {
+  case unfold il of : {
+     inl(y) => 0.0
+   | inr(y) => let (elem,rest) = y;
+               elem
+  }
+}
+
+// tail : list(A) -> list(A)
+
+/*
+  returns nil for empty list
+  EG: ???
+*/
+
+function tail forall (A)  (il : list(A)) : list(A) {
+  case unfold il of : {
+     inl(y) => nil(A)
+   | inr(y) => let (elem,rest) = y;
+               rest
+  }
+}
+
+// insertion sort
+
+// function cswp (e :[] (num, num)) : (num, num) {
+//   let (x,y) = e;
+
+//   if (x < y) then {
+//     (x, y)
+//   } else {
+//     (y, x)
+//   }
+// }
+
+// function insSort (input:[] list(num)) : list(num) {
+
+//   function insert (y:[] num) (l : [] list(num)) : list(num){
+
+//       fold[list(num)] case unfold l {
+//           inl(x) => inr (y, nil(num))
+//         | inr(x) => inr (
+//                      let (h,t) = x;
+//                      let (a,b) = (cswp (y,h));
+//                      (a, (insert b t)))
+//     }
+//   }
+
+//   case unfold input {
+//     inl(x) => fold[list(num)] inl ()
+//   | inr(x) => let (h,t)= x;
+//               insert h (insSort t)
+//   }
+// }
+
+// zip : list(A) -> list(B) -> list((A,B))
+// zip [1,2,3] ["a","b","c"] = [(1,"a"),(2,"b"),(3,"c")]
+// zip [1,2] [9,8,7,6,5,4,3] = [(1,9),(2,8)]
+// zip [9,8,7,6,5,4,3] [1,2] = [(9,1),(8,2)]
+
+function zip forall(A,B) (l1 :[] list(A)) (l2 :[] list(B)) : list((A,B)) {
+  case unfold l1 of : {
+    inl(x) => nil((A,B))
+  | inr(x) => case unfold l2 of : {
+                inl(y) => nil((A,B))
+              | inr(y) => let (xh,xt) = x; let (yh,yt) = y;
+                          cons((A,B),(xh,yh),((zip@[A]@[B] xt) yt))
+              }
+    }
+}
+
+////////////////////////////////////////////////////////////////
+/* Monadic lists over the probability monad */
+
+#define flist(A)     (mu X => (() + (fuzzy A, X)))
+#define finner(A)    (() + (fuzzy A, flist(A)))
+#define fnil(A)      (fold[flist(A)] (inl ()))
+#define fcons(A,a,b) (fold[flist(A)] (inr (a, b)))
+
+// listfuzz : flist(num) -o fuzzy list(num) [like mapM]
+
+function listfuzz (fl :[] flist(num)) : fuzzy list(num) {
+  case unfold fl of : {
+      inl(x) => return nil(num)
+    | inr(x) =>
+        let (lhead, ltail) = x;
+        sample y = lhead;
+        sample tailsample = listfuzz ltail;
+        return (cons(num, y, tailsample))
+  }
+}
+
+
+// A function to append two lists.
+// list_append : list(A) -o list(A) -o list(A)
+function list_append
+  forall(A)
+  (l1 :[] list(A))
+  (l2 :[] list(A)) : list(A)
+{
+  case (unfold l1) of : {
+    inl(unit) => l2
+  | inr(l) => let (h,t) = l;
+              cons(A, h, list_append@[A] t l2)
+  }
+}
+
+// A function to concatenate a list of lists.
+// list_concat list(list(A)) -o list(A)
+function list_concat
+  forall(A)
+  (lsts :[] list(list(A))) : list(A)
+{
+  case (unfold lsts) of : {
+    inl(unit) => nil(A)
+  | inr(p) => let (l1, lsts') = p;
+              list_append@[A] l1 (list_concat@[A] lsts')
+  }
+}
+
+
+// A list removal function
+// remove : A -o list(A) -> list(A)
+function remove
+  forall(A)
+  (elem : A)
+  (lst : list(A))
+  : list(A)
+  {
+    case (unfold lst) of : {
+      inl(unit) => nil(A)
+    | inr(xxs)  => let (x,xs) = xxs;
+                   if (x == elem) then [list(A)] { xs }
+                                  else { cons(A, x, (remove@[A] elem xs)) }
+    }
+  }
+
+
+
+// An indexing function that returns the value at the index and returns 
+// the same list but with the indexed value now fixed as the default 
+// value.  If the index is out of bounds, this returns the given 
+// default value.
+// index : A -o num -> list(A) -o (A, list(A))
+function index
+  forall(A)
+  (def :[] A)
+  (ind : num)
+  (lst :[] list(A))
+  : (A, list(A))
+  {
+    case (unfold lst) of :[] {
+      inl(unit) => (def, nil(A))
+    | inr(xxs)  => let (x,xs) = xxs;
+                   if (ind <= 0.0) then [(A, list(A))] { (x, cons(A, def, xs)) }
+                                   else { let (res,rlst) = index@[A] def (ind - 1.0) xs;
+                                         (res, cons(A,x,rlst)) }
+//                    case (unfold ind) of :[] {
+//                      inl(unit) => (x, cons(A, def, xs))
+//                    | inr(n')   => let (res,rlst) = index@[A] def n' xs;
+//                                   (res, cons(A,x,rlst))
+//                    }
+    }
+  }
+
+
+
