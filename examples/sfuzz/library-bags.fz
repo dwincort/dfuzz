@@ -18,7 +18,7 @@ primitive emptybag forall(A) (x : ()) : A bag { "emptybag" }
 primitive addtobag forall(A) (x :[] A) (xs :[] A bag) : A bag { "addtobag" }
 
 function listtobag forall(A) (lst :[] list(A)) : A bag {
-  case (unfold lst) of : {
+  case (unfold lst) of {
     inl(unit) => emptybag@[A] ()
   | inr(xxs)  => let (x,xs) = xxs;
                  addtobag@[A] x (listtobag@[A] xs)
@@ -113,7 +113,7 @@ function bagfilter forall (A) (test: A -> bool) (timeout : num) (b:[] A bag) : A
 */
 
 function bagpartition forall (A, K) (klist: list(K)) (timeout : num) (db :[] (K, A) bag) : list((K,A) bag) {
-    case unfold klist of : {
+    case unfold klist of {
       inl(x) => nil((K,A) bag)
     | inr(x) => let (k,ks) = x;
                 let (db1, db2) = bagsplit@[(K,A)] 

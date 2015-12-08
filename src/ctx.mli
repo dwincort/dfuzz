@@ -20,13 +20,8 @@ val empty_context : context
 
 val extend_var   : string -> ty -> context -> context
 val extend_ty_var : string -> kind -> context -> context
-val extend_cs : si_cs -> context -> context
-
-val remove_first_var   : context -> context
-val remove_first_ty_var : context -> context
 
 val access_var    : context -> int -> var_info * ty
-val access_ty_var : context -> int -> var_info * kind
 
 (* Name based functions for the parser *)
 val lookup_var   : string -> context -> (var_info * ty) option

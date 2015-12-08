@@ -45,7 +45,7 @@ function runTree
   (t : numtree)
   : bool
   {
-    case unfold t of : {
+    case unfold t of {
       inl(b) => b
     | inr(u) => let (p,ts) = u;
                 let (b,row') = index@[bool] false p row;
@@ -109,7 +109,7 @@ function makeTrees
   (t : numtree)
   : numtree bag
   {
-    case (unfold t) of : {
+    case (unfold t) of {
       inl(b) => list_foldl@[numtree bag]@[numtree bag] 
                   bagjoin@[numtree] (emptybag@[numtree] ())
         (list_map@[num]@[numtree bag] (fun (p : num) : (numtree bag) {
@@ -140,7 +140,7 @@ function generateDecisionTreeHelper
     trees : = makeTrees (listNums k) t;
     myfun : = fun (x : num) : num { evalFun (bagsize@[numtree] trees) delta epsilon x };
     rz : = execInRedZone@[numtree] (chooseBestTree t myfun trees 100.0);
-    case rz of : {
+    case rz of {
       inl(unit) => t
     | inr(result) =>
         let (t',de) = result;

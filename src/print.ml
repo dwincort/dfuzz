@@ -10,7 +10,6 @@
 open Format
 
 open Ctx
-open Constr
 open Syntax
 
 open Support.Options
@@ -102,7 +101,6 @@ let pp_name fmt (bt, n) =
   match bt with
     BiVar    -> pf  "%s" n
   | BiTyVar  -> pf "'%s" n
-  | BiETyVar -> pf "?%s" n
 
 let pp_vinfo fmt v =
   let vi = (v.v_type, v.v_name) in
@@ -133,7 +131,6 @@ let rec pp_si fmt s =
   | SiInfty                -> fprintf fmt "%s" (u_sym Symbols.Inf)
   | SiLub  (s1, s2)        -> fprintf fmt "(%a @<1>%s %a)" pp_si s1 (u_sym Symbols.Lub) pp_si s2
   | SiSup  (bi, k, s)      -> fprintf fmt "sup(%a : %a, %a)"  pp_binfo bi pp_kind k pp_si s
-  | SiCase (s, s0, bi, sn) -> fprintf fmt "case(%a, %a, %a, %a)" pp_si s pp_si s0 pp_binfo bi pp_si sn
 
 let rec pp_si_op fmt o =
   match o with
@@ -156,11 +153,6 @@ let pp_si_eq fmt cs_eq = match cs_eq with
 
 let pp_ctx_eq =
   pp_list pp_si_eq
-
-let pp_cs fmt cs =
-  fprintf fmt "@[<h>%a@] | @[<h>%a@] %s @[%a@] %s @[%a@]" pp_tyvar_ctx cs.c_kind_ctx
-    pp_ctx_eq cs.c_cs (u_sym Symbols.Vdash)
-    pp_si cs.c_upper (u_sym Symbols.Geq) pp_si cs.c_lower
 
 (**********************************************************************)
 (* Pretty printing for types *)
@@ -192,10 +184,6 @@ let rec pp_type ppf ty = match ty with
   | TyPrim tp                -> fprintf ppf "%a" pp_primtype tp
   (* Weird syntax choices *)
   | TyPrim1 (tp, ty)         -> fprintf ppf "%a(%a)" pp_primtype1 tp pp_type ty
-  (* Dependent types *)
-  | TySizedNat sz           -> fprintf ppf "%s[%a]" (u_sym Symbols.Nat) pp_si sz
-  | TySizedNum si           -> fprintf ppf "%s[%a]" (u_sym Symbols.Num) pp_si si
-  | TyList (ty, si)         -> fprintf ppf "list(%a)[%a]" pp_type ty pp_si si
   (* ADT *)
   | TyUnion(ty1, ty2)       -> fprintf ppf "(%a @<1>%s @[<h>%a@])" pp_type ty1 (u_sym Symbols.Union)  pp_type ty2
   | TyTensor(ty1, ty2)      -> fprintf ppf "(%a @<1>%s @[<h>%a@])" pp_type ty1 (u_sym Symbols.Tensor) pp_type ty2
@@ -205,8 +193,6 @@ let rec pp_type ppf ty = match ty with
   | TyMu(n, ty)             -> fprintf ppf "@<1>%s %a. @[<hov>(%a)@]" (u_sym Symbols.Mu) pp_binfo n pp_type ty
   (* Abs *)
   | TyForall(n, k, ty)      -> fprintf ppf "@<1>%s %a : %a.@;(@[%a@])" (u_sym Symbols.Forall) pp_binfo n pp_kind k pp_type ty
-  | TyExistsSize(n, ty)     -> fprintf ppf "@<1>%s %a : n.@;(@[%a@])" (u_sym Symbols.Exists) pp_binfo n pp_type ty
-
 let pp_type_list = pp_list pp_type
 
 (**********************************************************************)
@@ -329,34 +315,16 @@ let rec pp_term ppf t =
     fprintf ppf "@[<v>@[<hov>sample %a@ =@;<1 1>@[%a@]@];@,@[%a@]@]" pp_binfo n pp_term tm1 pp_term tm2
 
   (* Case expressions *)
-  | TmUnionCase(_, tm, si, ty, ln, ltm, rn, rtm) ->
+  | TmUnionCase(_, tm, ln, ltm, rn, rtm) ->
     (* Alternative using vertical boxes *)
-    fprintf ppf "case @[%a@] return [%a] of [%a] {@\n   inl(%a) @<1>%s @[%a@]@\n | inr(%a) @<1>%s @[%a@]@\n}"
-      pp_term tm pp_type ty pp_si si
+    fprintf ppf "case @[%a@] return of {@\n   inl(%a) @<1>%s @[%a@]@\n | inr(%a) @<1>%s @[%a@]@\n}"
+      pp_term tm
       pp_binfo ln (u_sym Symbols.DblArrow) pp_term ltm
       pp_binfo rn (u_sym Symbols.DblArrow) pp_term rtm
 
-  | TmListCase(_, tm, ty, ltm, elem, list, si, rtm) ->
-    fprintf ppf "listcase @[%a@] return [%a] {@\n   [] @<1>%s @[%a@]@\n | (%a :: %a)[%a] @<1>%s @[%a@]@\n}"
-      pp_term tm pp_type ty (u_sym Symbols.DblArrow) pp_term ltm
-      pp_binfo elem pp_binfo list pp_binfo si (u_sym Symbols.DblArrow) pp_term rtm
-
-  | TmNatCase(_, tm, ty, ltm, nat, si, rtm) ->
-    fprintf ppf "natcase @[%a@] return [%a] {@\n   Z @<1>%s @[%a@]@\n | S(%a)[%a] @<1>%s @[%a@]@\n}"
-      pp_term tm pp_type ty
-      (u_sym Symbols.DblArrow) pp_term ltm
-      pp_binfo nat pp_binfo si (u_sym Symbols.DblArrow) pp_term rtm
-
-  (* | TmFix(_,bi,ty,tm) -> fprintf ppf "@[<hv 1>%s (%s: %a). @,%a@]" (u_sym Symbols.Mu) (sb bi) pp_type ty pp_term tm *)
-
-  (* Pack/Unpack *)
-  | TmPack(_, term, si, ty)    -> fprintf ppf "pack %a with %a as %a"    pp_term term pp_si si pp_type ty
-  | TmUnpack(_, n, si, t1, t2) -> fprintf ppf "unpack (%a, %a) = %a; %a" pp_binfo n pp_binfo si pp_term t1 pp_term t2
-
-  (* Type/Sensitity Abstraction and Application *)
+  (* Type Abstraction and Application *)
   | TmTyAbs(_, bi, ki, tm) -> fprintf ppf "@<1>%s (%a : %a).@\n@[<hov 1> %a@]" (u_sym Symbols.BigLambda) pp_binfo bi pp_kind ki pp_term tm
   | TmTyApp(_, tm, ty)     -> fprintf ppf "(%a@@[@[%a@]])" pp_term tm pp_type ty
-  | TmSiApp(_, tm, si)     -> fprintf ppf "(%a [@[%a@]])" pp_term tm pp_si si
 
 (* We print some applications in an special way, note that this relies on debug information *)
 and print_special_app ppf tm1 tm2 =

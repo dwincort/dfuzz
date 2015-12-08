@@ -146,8 +146,6 @@ let rec remove_quantifiers ty = match ty with
 %token <Support.FileInfo.info> FUZZY
 %token <Support.FileInfo.info> FUN
 %token <Support.FileInfo.info> UNIONCASE
-%token <Support.FileInfo.info> LISTCASE
-%token <Support.FileInfo.info> NUMCASE
 %token <Support.FileInfo.info> OF
 %token <Support.FileInfo.info> FOLD
 %token <Support.FileInfo.info> UNFOLD
@@ -170,19 +168,7 @@ let rec remove_quantifiers ty = match ty with
 %token <Support.FileInfo.info> SIZE
 %token <Support.FileInfo.info> SENS
 %token <Support.FileInfo.info> TYPE
-%token <Support.FileInfo.info> PACK
-%token <Support.FileInfo.info> WITH
-%token <Support.FileInfo.info> IN
-%token <Support.FileInfo.info> FOR
-%token <Support.FileInfo.info> UNPACK
-%token <Support.FileInfo.info> FUZZ
-%token <Support.FileInfo.info> FUZZB
-%token <Support.FileInfo.info> PRIMITER
 %token <Support.FileInfo.info> FORALL
-%token <Support.FileInfo.info> EXISTS
-%token <Support.FileInfo.info> LIST
-%token <Support.FileInfo.info> DBLCOLON
-%token <Support.FileInfo.info> NAT
 %token <Support.FileInfo.info> CLIPPED
 %token <Support.FileInfo.info> DBSOURCE
 %token <Support.FileInfo.info> INT
@@ -223,7 +209,6 @@ Term :
           let ctx' = extend_var $1.v ctx in
           TmLet($1.i, (nb_var $1.v), $2 ctx, $4 ctx, $6 ctx')
       }
-  /* | LET LPAREN ID COMMA ID RPAREN SensAnn EQUAL Expr SEMI Term */
   | LET LPAREN ID COMMA ID RPAREN EQUAL Expr SEMI Term
       { fun ctx ->
         (* TODO, what happens with let (x,x) = ...? *)
@@ -238,7 +223,8 @@ Term :
   | TYPEDEF ID EQUAL Type SEMI Term
       {
         fun ctx ->
-        TmTypedef($1, (nb_tyvar $2.v), $4 (extend_ty_var $2.v Star ctx), $6 (extend_ty_var $2.v Star ctx))
+        let ctx_let = extend_ty_var $2.v Star ctx in
+        TmTypedef($1, (nb_tyvar $2.v), $4 ctx_let, $6 ctx_let)
       }
   | PRIMITIVE ID Quantifiers Arguments COLON Type LBRACE PrimSpec RBRACE Term
       { fun ctx ->
@@ -358,14 +344,11 @@ STerm :
         mk_prim_app_args $1 if_then_spec (List.rev arg_list)
       }
 
-  /* Fixme: Reflect type */
-  /* Fixme: Read return annotation */
-  /* EG: Leaving untouched until I can figure it out what is going out with this rule */
-  | UNIONCASE Expr OF SensAnn LBRACE INL LPAREN ID RPAREN DBLARROW Term PIPE INR LPAREN ID RPAREN DBLARROW Term RBRACE
+  | UNIONCASE Expr OF LBRACE INL LPAREN ID RPAREN DBLARROW Term PIPE INR LPAREN ID RPAREN DBLARROW Term RBRACE
       { fun ctx ->
-        let ctx_l = extend_var $8.v  ctx in
-        let ctx_r = extend_var $15.v ctx in
-        TmUnionCase($1, $2 ctx, $4 ctx, dummy_ty, nb_var $8.v, $11 ctx_l, nb_var  $15.v, $18 ctx_r) }
+        let ctx_l = extend_var $7.v  ctx in
+        let ctx_r = extend_var $14.v ctx in
+        TmUnionCase($1, $2 ctx, nb_var $7.v, $10 ctx_l, nb_var $14.v, $17 ctx_r) }
 
   | FUN LPAREN ID SensType RPAREN MaybeType LBRACE Term RBRACE
       { fun ctx -> TmAbs($1, nb_var $3.v, $4 ctx, $6 ctx, $8 (extend_var $3.v ctx )) }
@@ -382,8 +365,8 @@ FExpr :
 SFExpr:
     TFExpr
       { $1 }
-  | SFExpr LBRACK SensTerm RBRACK
-      { fun ctx -> TmSiApp($2, $1 ctx, $3 ctx) }
+/*  | SFExpr LBRACK SensTerm RBRACK
+      { fun ctx -> TmSiApp($2, $1 ctx, $3 ctx) } */
 
 /* Type application */
 TFExpr:
@@ -437,23 +420,6 @@ SensMulTerm :
       { fun ctx -> SiMult($1 ctx, $3 ctx) }
   | SensAtomicTerm
       { $1 }
-
-SizeTerm :
-    ID
-      { fun ctx -> let (v, k) = existing_tyvar $1.i $1.v ctx in
-                   match k with
-                   | Star -> parser_error $1.i "Cannot bind a type variable in sensitivity"
-                   | Sens -> parser_error $1.i "Cannot bind a sens variable in a size"
-                   | Size -> (SiVar v)
-      }
-  | ZERO
-      { fun _cx ->
-        SiZero
-      }
-  | SUCC SizeTerm
-      { fun ctx ->
-        SiSucc ($2 ctx)
-      }
 
 SensAtomicTerm :
     ID
@@ -525,10 +491,6 @@ Type :
       { fun ctx -> TyPrim1 (Prim1Set, ($1 ctx)) }
   | AType BAG
       { fun ctx -> TyPrim1 (Prim1Bag, ($1 ctx)) }
-  | NAT LBRACK SizeTerm RBRACK
-      { fun ctx -> TySizedNat($3 ctx) }
-  | NUM LBRACK SensTerm RBRACK
-      { fun ctx -> TySizedNum($3 ctx) }
   | MU ID DBLARROW Type
       { fun ctx -> TyMu(nb_tyvar $2.v, $4 (extend_ty_var $2.v Star ctx)) }
   | ComplexType
@@ -558,7 +520,7 @@ AType :
     LPAREN Type RPAREN
       { $2 }
   | ID
-      {	fun ctx -> let (v, _) = existing_tyvar $1.i $1.v ctx in
+      { fun ctx -> let (v, _) = existing_tyvar $1.i $1.v ctx in
                    TyVar v
       }
   | BOOL

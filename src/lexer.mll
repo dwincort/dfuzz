@@ -20,7 +20,6 @@ let reservedWords = [
   ("{", fun i -> Parser.LBRACE i);
   ("}", fun i -> Parser.RBRACE i);
   (":", fun i -> Parser.COLON i);
-  ("::", fun i -> Parser.DBLCOLON i);
   (",", fun i -> Parser.COMMA i);
   ("=", fun i -> Parser.EQUAL i);
   ("==", fun i -> Parser.BEQUAL i);
@@ -50,10 +49,8 @@ let reservedWords = [
   ("fuzzy", fun i -> Parser.FUZZY i);
   ("fun", fun i -> Parser.FUN i);
   ("case", fun i -> Parser.UNIONCASE i);
-  ("listcase", fun i -> Parser.LISTCASE i);
   ("inl", fun i -> Parser.INL i);
   ("inr", fun i -> Parser.INR i);
-  ("numcase", fun i -> Parser.NUMCASE i);
   ("of", fun i -> Parser.OF i);
   ("fold", fun i -> Parser.FOLD i);
   ("unfold", fun i -> Parser.UNFOLD i);
@@ -61,9 +58,6 @@ let reservedWords = [
   ("let", fun i -> Parser.LET i);
   ("typedef", fun i -> Parser.TYPEDEF i);
   ("sample", fun i -> Parser.SAMPLE i);
-  ("fuzz", fun i -> Parser.FUZZ i);
-  ("fuzze", fun i -> Parser.FUZZB i);
-  ("primiter", fun i -> Parser.PRIMITER i);
   ("function", fun i -> Parser.FUNCTION i);
   ("primitive", fun i -> Parser.PRIMITIVE i);
   ("clipped", fun i -> Parser.CLIPPED i);
@@ -77,21 +71,11 @@ let reservedWords = [
   ("num", fun i -> Parser.NUM i);
   ("string", fun i -> Parser.STRING i);
   ("db_source", fun i -> Parser.DBSOURCE i);
-  ("list", fun i -> Parser.LIST i);
   ("sens", fun i -> Parser.SENS i);
   ("size", fun i -> Parser.SIZE i);
   ("type", fun i -> Parser.TYPE i);
-  ("pack", fun i -> Parser.PACK i);
-  ("with", fun i -> Parser.WITH i);
-  ("for", fun i -> Parser.FOR i);
-  ("in", fun i -> Parser.IN i);
-  ("unpack", fun i -> Parser.UNPACK i);
   ("forall", fun i -> Parser.FORALL i);
-  ("exists", fun i -> Parser.EXISTS i);
-  ("nat", fun i -> Parser.NAT i);
   ("int", fun i -> Parser.INT i);
-  ("Z", fun i -> Parser.ZERO i);
-  ("S", fun i -> Parser.SUCC i);
 ]
 
 (* Support functions *)

@@ -64,7 +64,7 @@ let rec gen_term ppf t =
       fprintf ppf "(let (%s,%s) =  %a in@\n@[%a@])"
         (ml_b b_x) (ml_b b_y) gen_term tm_e1 gen_term tm_e2
 
-    | TmUnionCase (_, tm_e, _ty, _si, bi_l, tm_l, bi_r, tm_r) ->
+    | TmUnionCase (_, tm_e, bi_l, tm_l, bi_r, tm_r) ->
       fprintf ppf "(match %a with @[<v>| Left %s -> %a @,| Right %s -> %a@])"
         gen_term tm_e (ml_b bi_l) gen_term tm_l (ml_b bi_r) gen_term tm_r
 
@@ -118,14 +118,6 @@ let rec gen_term ppf t =
     | TmTyAbs(_i, _b, _k, tm)      -> gen_term ppf tm
     | TmTyApp(_i, tm, _ty)         -> gen_term ppf tm
 
-    (* TODO: DFuzz *)
-    | TmSiApp(_,_,_)         -> fprintf ppf "XXX TODO: TmInst"
-
-    | TmListCase (_) -> fprintf ppf "XXX TODO list case"
-    | TmNatCase (_)  -> fprintf ppf "XXX TODO nat case"
-
-    | TmUnpack(_,_,_,_,_)    -> fprintf ppf "XXX TODO: TmUnpack"
-    | TmPack(_,_,_,_)        -> fprintf ppf "XXX TODO: TmPack"
 
 let rec gen_program ppf t =
   fprintf ppf "%s@\n" header;

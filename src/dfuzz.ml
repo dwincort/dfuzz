@@ -71,19 +71,15 @@ let parse file =
 let check_main_type ty =
   match ty with
   | TyLollipop (TyPrim PrimDBS, _, TyPrim1 (Prim1Fuzzy, TyPrim PrimString)) -> ()
-  | _ -> main_error dp "The type of the program must the db_source -o[?] fuzzy string"
+  | _ -> main_error dp "The type of the program must be db_source -o[?] fuzzy string"
 
 (* module WS = WhySolver *)
 
 let type_check program =
   let ty = Ty_bi.get_type program  in
-  let cs = Constr.get_cs ()        in
 
   main_info  dp "Type of the program: @[%a@]" Print.pp_type ty;
-  main_info  dp "CS: @[<v>%a@]" (Print.pp_list Print.pp_cs) cs;
 
-  (* let res = WS.send_smt (List.hd (List.tl cs)) in *)
-  (* let res = List.map WS.send_smt cs in *)
   ()
 
   (* Disabled as we don't run the programs for now *)

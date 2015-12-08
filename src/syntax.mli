@@ -10,7 +10,6 @@ open Support.FileInfo
 type fuzz_binding =
     BiVar    (* Regular varible *)
   | BiTyVar  (* Type variable   *)
-  | BiETyVar (* Existential variable  *)
 
 (* Variables and binders *)
 type var_info = {
@@ -21,9 +20,6 @@ type var_info = {
   v_size  : int;
   v_type  : fuzz_binding;
 }
-
-(* Default var_info *)
-val dvi : var_info
 
 (* Adds n to a var_info *)
 val var_shift : int -> int -> var_info -> var_info
@@ -59,7 +55,6 @@ type si =
   | SiLub   of si * si
   (* We only allow to sup the first variable *)
   | SiSup   of binder_info * kind * si
-  | SiCase  of si * si * binder_info * si
 
 (* Shift variable indexes by n *)
 val si_shift : int -> int -> si -> si
@@ -108,26 +103,16 @@ type ty =
 
   (* Quantified types *)
   | TyForall     of binder_info * kind * ty
-  | TyExistsSize of binder_info * ty
-
-  (********************************************************************)
-  (* Dependent types *)
-  | TySizedNat of si
-  | TySizedNum of si
-  | TyList     of ty * si
-
-(* XXX: This is incorrect, right now it shifts all the indexes, thus
-   it is buggy, see the other comment *)
 
 (* Shift all the open indexes by n *)
 val ty_shift : int -> int -> ty -> ty
 
-(* Substitutions *)
-
 (* Capture avoiding sub, the term must be dependent on the number of
    binders under it is replaced *)
 val ty_subst     : int -> ty -> ty -> ty
-val ty_si_subst  : int -> si -> ty -> ty
+
+(* Unfold a mu type *)
+val ty_unfold : ty -> ty
 
 (* Terms *)
 
@@ -144,65 +129,39 @@ type term_prim =
 val type_of_prim : term_prim -> ty
 
 type term =
-    TmVar of info * var_info
-
-  (*  *)
-  | TmPair      of info * term * term
-  (* | TmTensDest  of info * binder_info * binder_info * si * term * term *)
-  | TmTensDest  of info * binder_info * binder_info * term * term
-
-  | TmUnionCase of info * term * si * ty           * binder_info * term * binder_info * term
-  (*                      t      [si] return ty of { inl(x)     => tm1  | inl(y)     => tm2  } *)
-
+  | TmVar of info * var_info
   (* Primitive terms *)
   | TmPrim     of info * term_prim
 
-  (* The three fundamental constructs of our language: *)
+  | TmPair      of info * term * term
+  | TmTensDest  of info * binder_info * binder_info * term * term
+  (* & constructor *)
+  | TmAmpersand of info * term * term
+  | TmUnionCase of info * term * binder_info * term * binder_info * term
+  (*                      t  of { inl(x)     => tm1  | inl(y)     => tm2  } *)
 
   (* Regular Abstraction and Applicacion *)
   | TmApp of info * term * term
-
-  (* In a lambda is possible to independently annotate the input and return type *)
   | TmAbs of info * binder_info * (si * ty) * ty option * term
-
-  (* & constructor *)
-  | TmAmpersand of info * term * term
 
   (* Recursive data types *)
   | TmFold    of info * ty * term
   | TmUnfold  of info * term
 
-  (* Only needed for polymorphism *)
+  (* Bindings *)
   | TmLet      of info * binder_info * si * term * term
   | TmLetRec   of info * binder_info * ty * term * term
   | TmSample   of info * binder_info * term * term
 
-  (***********************************************************************)
-  (* What to do with this, what is the typing rule?                      *)
-  | TmTypedef of info * binder_info * ty * term
-
-  (***********************************************************************)
-  (* Dependent case expressions, removal pending on type constraints     *)
-
-  (*                      t      return ty of {nil => tm1  | (    x     ::     xs      ) [si]       => tm2 } *)
-  | TmListCase  of info * term * ty                 * term * binder_info * binder_info * binder_info * term
-  (*                      t      return ty of {Z   => tm1  | (S x)         [si]       => tm2 }                 *)
-  | TmNatCase   of info * term * ty                 * term * binder_info * binder_info * term
-
-  (* Pack/Unpack *)
-  | TmPack of info * term * si * ty
-  | TmUnpack of info * binder_info * binder_info * term * term
-
-  (* Sensitity Abstraction and Applicacion *)
+  (* Type Abstraction and Applicacion *)
   | TmTyAbs of info * binder_info * kind * term
-  | TmSiApp of info * term * si
   | TmTyApp of info * term * ty
+
+  (* Type definitions *)
+  | TmTypedef of info * binder_info * ty * term
 
 val tmInfo : term -> info
 
-(* Substitution for type and sens annotations *)
+(* Substitution for type annotations *)
 (* tm[t/x] *)
 val term_ty_subst : int -> ty -> term -> term
-val term_si_subst : int -> si -> term -> term
-
-val ty_unfold : ty -> ty
