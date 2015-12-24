@@ -6,21 +6,16 @@
 *)
 module Options = struct
 
-  (* Are we running in dependent mode? *)
-  let dfuzz_enabled = ref false
-
   (* Components of the compiler *)
   type component =
   | General
   | Lexer
   | Parser
   | TypeChecker
-  | SMT
-  | Backend
+  | Interpreter
 
   let default_components =
-    [Lexer; Parser; TypeChecker; SMT]
-    (* [Lexer; Parser; TypeChecker; Backend] *)
+    [Lexer; Parser; TypeChecker; Interpreter]
 
   let components = ref default_components
 
@@ -48,7 +43,7 @@ module Options = struct
   }
 
   let debug_default = {
-    components   = [General;Lexer;Parser;TypeChecker;SMT;Backend];
+    components   = [General;Lexer;Parser;TypeChecker;Interpreter];
     level        = 2;
     unicode      = true;
     pr_ann       = true;
@@ -113,8 +108,7 @@ module Error = struct
     | Lexer       -> "[Lexer  ]"
     | Parser      -> "[Parser ]"
     | TypeChecker -> "[TyCheck]"
-    | SMT         -> "[SMT    ]"
-    | Backend     -> "[Backend]"
+    | Interpreter -> "[Interp ]"
 
   let level_to_string = function 
     | 0 -> "Error  "

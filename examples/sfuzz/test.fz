@@ -1,0 +1,16 @@
+
+function foo (c : num) (n :[[c]] num) : fuzzy num {
+  return (const_mult c n)
+}
+
+function main (x : num) : string {
+  rz = runFuzz@[num]@[num] (foo x);
+  case rz of {
+    inl(unit) => "error"
+  | inr(z) => num2string z
+  }
+}
+
+x = loadDB@[num] 2.0;
+main 3.0
+

@@ -6,12 +6,10 @@
 /* Also include cpp for trees */
 
 #define tree(A)       (mu YY => (bool + (A, (YY,YY))))
-#define leafT(A)      (fold[tree(A)] (inl@[bool]@[(A, (tree(A), tree(A)))] true))
-#define leafF(A)      (fold[tree(A)] (inl@[bool]@[(A, (tree(A), tree(A)))] false))
-#define node(A,p,l,r) (fold[tree(A)] (inr@[bool]@[(A, (tree(A), tree(A)))] (p,(l,r))))
+#define leafT(A)      (fold[tree(A)] (inl@[bool]@[(A, (tree(A), tree(A)))]{true}))
+#define leafF(A)      (fold[tree(A)] (inl@[bool]@[(A, (tree(A), tree(A)))]{false}))
+#define node(A,p,l,r) (fold[tree(A)] (inr@[bool]@[(A, (tree(A), tree(A)))]{(p,(l,r))}))
 
-typedef delta = num;
-typedef epsilon = num;
 typedef boollist = list(bool);
 typedef db = boollist bag;
 typedef numtree = tree(num);
@@ -25,23 +23,11 @@ There will be k*(number of leaves) possible trees.
 This will be some sort of concatmap over a fold.
 */
 
-primitive execInRedZone
-  forall(A)
-  (foo : db -o fuzzy A) : (string + (A, (delta, epsilon))) { "execInRedZone" }
-
-// A stub for the exponential function, which is actually
-// already in Fuzz ...
-primitive expFuzz
-  forall(A,B)
-  (foo : A -> (B bag) -o fuzzy num) (rs : A bag) (db :[] B bag) : fuzzy A
-{ "expfuzz" }
-
-
 // runTree takes a row of parameters and a tree and returns the 
 // value that the tree predicts for this row.
 // runTree : list(bool) -o tree -> bool
 function runTree
-  (row :[] boollist)
+  (row : boollist)
   (t : numtree)
   : bool
   {
@@ -50,17 +36,14 @@ function runTree
     | inr(u) => let (p,ts) = u;
                 let (b,row') = index@[bool] false p row;
                 let (t1,t2) = ts;
-                if b then [bool]
-                       { runTree row' t1 }
-                  else { runTree row' t2 }
-//                runTree row' (if b then [numtree] { t1 } else { t2 })
+                runTree row' (if b then { t1 } else { t2 })
     }
   }
 
 
 // testTree takes a set of rows and a tree and returns the number of 
 // times the tree correctly predicts the label for a row.
-// testTree : db -o tree -> Circle num
+// testTree : db -o tree -> Fuzzy num
 function testTree
   (bagtime : num)
   (t : numtree)
@@ -68,7 +51,7 @@ function testTree
   : fuzzy num
   {
     let (suc,fail) = bagsplit@[boollist]
-        (fun (row :[] boollist) : bool {
+        (fun (row : boollist) : bool {
             let (b,row') = index false 0.0 row;
             runTree row' t == b }) 100.0 db;
     return (bagsize@[boollist] suc)
@@ -78,7 +61,7 @@ function testTree
 // chooseBestTree finds the best tree among those provided
 // so long as it's better than the base tree's error adjusted 
 // by the user provided function.
-// chooseBestTree : tree -> (num -> num) -> list(tree) -> db -o Circle (1 + tree)
+// chooseBestTree : tree -> (num -> num) -> list(tree) -> db -o Fuzzy (1 + tree)
 function chooseBestTree
   (t : numtree)             // the base tree
   (cutoffMod : num -> num)  // the amount of error to beat
@@ -89,15 +72,15 @@ function chooseBestTree
   {
     test : = fun (t' : numtree) { fun (d :[] db) : fuzzy num {
                   sample score = testTree bagtime t' d;
-                  if t == t' then [fuzzy num] { return (cutoffMod score) }
+                  if t == t' then { return (cutoffMod score) }
                              else { return score } } };
-    expFuzz@[numtree]@[boollist] test (addtobag@[numtree] t trees) db
+    expMech@[numtree]@[db] test (addtobag@[numtree] t trees) db
   }
 
 
 // A function to return a list of nums [k .. 1]
 function listNums (k : num) : list(num) {
-  if (k <= 0.0) then [list(num)] { nil(num) }
+  if (k <= 0.0) then { nil(num) }
                 else { cons(num, k, listNums (k - 1.0)) }
 }
 
@@ -139,13 +122,13 @@ function generateDecisionTreeHelper
   {
     trees : = makeTrees (listNums k) t;
     myfun : = fun (x : num) : num { evalFun (bagsize@[numtree] trees) delta epsilon x };
-    rz : = execInRedZone@[numtree] (chooseBestTree t myfun trees 100.0);
+    rz : = runFuzz@[db]@[numtree] (chooseBestTree t myfun trees 100.0);
     case rz of {
       inl(unit) => t
-    | inr(result) =>
-        let (t',de) = result;
-        let (d,e) = de;
-        if (t == t') then [numtree] { t' }
+    | inr(t') =>
+        d : = getDelta ();
+        e : = getEpsilon ();
+        if (t == t') then { t' }
                      else { generateDecisionTreeHelper k evalFun d e t' }
     }
   }
@@ -158,18 +141,18 @@ function generateDecisionTree
   (evalFun : num -> num -> num -> num -> num) //perhaps the last one should be -o?
         //  length trees -> delta -> epsilon -> base tree score -> modified tree score
   : numtree
-  { generateDecisionTreeHelper k evalFun 0.0 0.0 leafT(num) }
-
+  { generateDecisionTreeHelper k (evalFun) 0.0 0.0 leafT(num) }
 
 
 
 
 function myeval (len : num) (delta : num) (eps : num) (bs : num) : num {
-  bs }
+  bs
+  }
 
-function main (db :[] db) : fuzzy string {
+function main (_unit : ()) : string {
   t : = generateDecisionTree 2.0 myeval;
-  return ("printTree")
+  "print tree"
 }
 
-main
+main ()

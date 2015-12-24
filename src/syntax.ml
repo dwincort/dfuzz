@@ -4,35 +4,17 @@
    LICENSE: 3-clause BSD style.
    See the LICENSE file for details on licensing.
 *)
-open Format
+open Types
+(* open Format *)
 open Support.FileInfo
 
 (* ---------------------------------------------------------------------- *)
 (* Abstract Syntax Tree for sensitivities, terms and types                *)
 (* ---------------------------------------------------------------------- *)
 
-(* TODO: Modularize. TyLollipop -> Type.Lollipop, etc... *)
-
-(* Binders are represented using Debruijn notation *)
-
-(* Different types of variable binding, for debug purposes *)
-type fuzz_binding =
-    BiVar    (* Regular varible *)
-  | BiTyVar  (* Type variable   *)
-
-type var_info = {
-  (* Indexes start a 0 *)
-  v_index : int;
-
-  (* Debug fields *)
-  v_name  : string; (* The name is printed on screen, but it is ignored for all purposes *)
-  v_size  : int;
-  v_type  : fuzz_binding;
-}
-
-(* Helper to modify the index
+(* A helper function to modify the index of a variable.
 var_shift : int         -- all variables with index greater than or equal to this value will be shifted
-         -> int         -- the amount to shift by
+         -> int         -- the amount to shift (add) by
          -> var_info    -- var_info to shift
          -> var_info    -- Updated var_info *)
 let var_shift o n v = { v with
@@ -40,273 +22,239 @@ let var_shift o n v = { v with
   v_size  = v.v_size  + n;
 }
 
-(* All of the fields are debug information *)
-type binder_info = {
-  b_name : string;       (* Name of the binder *)
-  b_size : int;          (* How many outside binders we had when this binded was found *)
-  b_type : fuzz_binding; (* What kind of binding this is *)
-  b_prim : bool;         (* Is this a primitive *)
+let var_from_binder (index : int) (b : binder_info) : var_info = {
+  v_index = index;
+  v_name  = b.b_name;
+  v_size  = b.b_size;
+  v_type  = b.b_type;
 }
 
-(* Kinds for type variables *)
-type kind =
-    Star
-  | Size
-  | Sens
 
-(* Part 1: Sizes and Sensitivities *)
+(* ---------------------------------------------------------------------- *)
+(* AST Mapping *)
 
-(* Sensitivities *)
-type si =
-  | SiZero
-  | SiSucc  of si
-  | SiInfty
-  | SiConst of float
-  | SiVar   of var_info
-  | SiAdd   of si * si
-  | SiMult  of si * si
-  | SiLub   of si * si
-  (* We only allow to sup to happen over the first variable *)
-  | SiSup   of binder_info * kind * si
+(* Once again because of the potentially cyclic structure of the AST
+   (that is, terms can contain sensitivites and sensitivites can contain 
+   types), we define our ability to map over the AST in a mutually 
+   recursive way.
+   Note that these maps keep track of the type level Debruijn indeces. *)
 
-(* Map over the variables of a sensitivity type *)
-let rec si_map n f si =
-  let smf = si_map n f     in
-  let smb = si_map (n+1) f in
-  match si with
-    SiVar   v       -> f n v
-  | SiZero          -> SiZero
-  | SiSucc  s       -> SiSucc (smf s)
-  | SiConst c       -> SiConst c
-  | SiAdd  (x, y)   -> SiAdd (smf x, smf y)
-  | SiMult (x, y)   -> SiMult(smf x, smf y)
-  | SiInfty         -> SiInfty
-  | SiLub  (s1, s2) -> SiLub (smf s1, smf s2)
-  | SiSup  (bi, k, s)      -> SiSup (bi, k, smb s)
+(* Map over the terms of a sensitivity type *)
+let rec si_map
+  (ftm : term -> term)  (* The action to take on embedded terms *)
+  (si : si)             (* The sensitivity to map over *)
+  : si =
+    match si with
+    | SiInfty         -> si
+    | SiConst c       -> si
+    | SiTerm  t       -> SiTerm (ftm t)
+    | SiAdd  (s1, s2) -> SiAdd  (si_map ftm s1, si_map ftm s2)
+    | SiMult (s1, s2) -> SiMult (si_map ftm s1, si_map ftm s2)
+    | SiLub  (s1, s2) -> SiLub  (si_map ftm s1, si_map ftm s2)
 
-(* Shifts all the variables greater or equal than o by n *)
-let si_shift o n si =
-  let f o v  = SiVar (var_shift o n v) in
-  si_map o f si
+(* Map over types *)
+let rec ty_map
+  (n   : int)                   (* The number of binders deep we are *)
+  (fv  : int -> var_info -> ty) (* The action on type variables *)
+  (fsi : int -> si -> si)       (* The action on sesitivities *)
+  (ty  : ty)                    (* The type to map over *)
+  : ty = 
+    let tmap n ty = ty_map n fv fsi ty in
+    match ty with
+      TyVar v                 -> fv n v
+    | TyPrim tp               -> TyPrim tp
+    | TyPrim1 (tp, ty)        -> TyPrim1 (tp, tmap n ty)
+    (* ADT *)
+    | TyUnion(ty1, ty2)       -> TyUnion    (tmap n ty1, tmap n ty2)
+    | TyTensor(ty1, ty2)      -> TyTensor   (tmap n ty1, tmap n ty2)
+    | TyAmpersand(ty1, ty2)   -> TyAmpersand(tmap n ty1, tmap n ty2)
+    (* *)
+    | TyLollipop(ty1, s, ty2) -> TyLollipop(tmap n ty1, fsi n s, tmap n ty2)
+    
+    | TyMu(b, ty)             -> TyMu(b, tmap (n+1) ty)
+    (* *)
+    | TyForall(b, ty)         -> TyForall(b, tmap (n+1) ty)
 
-type si_cs = SiEq of (si * si)
+let rec tm_map
+  (ntm : int)               (* The number of regular variable binders deep we are *)
+  (nty : int)               (* The number of type variable binders deep we are *)
+  (fv  : int -> int -> info -> var_info -> term) (* The action on regular variables (with the ntm value) *)
+  (fty : int -> int -> ty -> ty)   (* Action to take on types *)
+  (fsi : int -> int -> si -> si)   (* Action to take on sensitivites *)
+  (tm : term)               (* The term to map over *)
+  : term = 
+  let tf ntm nty tm = tm_map ntm nty fv fty fsi tm in
+  match tm with
+  | TmVar (i, v)                    ->
+    fv ntm nty i v
+  
+  | TmPrim(i, p) ->
+    TmPrim(i, p)
+    
+  | TmPrimFun(i, s,             ty,                       tmlst)  ->
+    TmPrimFun(i, s, fty ntm nty ty, List.map (tf ntm nty) tmlst)
+  
+  | TmBag(i,             ty,                       tmlst) ->
+    TmBag(i, fty ntm nty ty, List.map (tf ntm nty) tmlst)
+  
+  | TmPair(i,            tm1,            tm2)   ->
+    TmPair(i, tf ntm nty tm1, tf ntm nty tm2)
+  
+  | TmTensDest(i, bi_x, bi_y,            tm,                tm_i)   ->
+    TmTensDest(i, bi_x, bi_y, tf ntm nty tm, tf (ntm+2) nty tm_i)
+  
+  | TmAmpersand(i,            tm1,            tm2)  ->
+    TmAmpersand(i, tf ntm nty tm1, tf ntm nty tm2)
+  
+  | TmLeft(i,            tm,             ty)    ->
+    TmLeft(i, tf ntm nty tm, fty ntm nty ty)
+  
+  | TmRight(i,            tm,             ty)   ->
+    TmRight(i, tf ntm nty tm, fty ntm nty ty)
+  
+  | TmUnionCase(i,            tm, bi_l,                tm_l, bi_r,                tm_r)   ->
+    TmUnionCase(i, tf ntm nty tm, bi_l, tf (ntm+1) nty tm_l, bi_r, tf (ntm+1) nty tm_r)
+  
+  (* Abstraction and application *)
+  | TmAbs(i, bi, (            si,             ty),                            orty,                tm)  ->
+    TmAbs(i, bi, (fsi ntm nty si, fty ntm nty ty), (Option.map (fty ntm nty)) orty, tf (ntm+1) nty tm)
+  
+  | TmApp(i,            tm1,            tm2)    ->
+    TmApp(i, tf ntm nty tm1, tf ntm nty tm2)
+  
+  (*  *)
+  | TmLet(i, bi,             si,            tm,                tm_i)  ->
+    TmLet(i, bi, fsi ntm nty si, tf ntm nty tm, tf (ntm+1) nty tm_i)
+  
+  | TmLetRec(i, bi,             ty,                tm,                tm_i)   ->
+    TmLetRec(i, bi, fty ntm nty ty, tf (ntm+1) nty tm, tf (ntm+1) nty tm_i)
+  
+  | TmSample(i, bi,            tm,                tm_i) ->
+    TmSample(i, bi, tf ntm nty tm, tf (ntm+1) nty tm_i)
+  
+  (* Recursive datatypes *)
+  | TmFold(i,             ty,            tm)    ->
+    TmFold(i, fty ntm nty ty, tf ntm nty tm)
+  
+  | TmUnfold(i,            tm)    ->
+    TmUnfold(i, tf ntm nty tm)
+  
+  (* Type definition *)
+  | TmTypedef(i, bi,                 ty,                tm) ->
+    TmTypedef(i, bi, fty ntm (nty+1) ty, tf ntm (nty+1) tm)
+  
+  (* Type abstraction and application *)
+  | TmTyApp (i,            tm,             ty)  ->
+    TmTyApp (i, tf ntm nty tm, fty ntm nty ty)
+  
+  | TmTyAbs (i, bi,                tm)    ->
+    TmTyAbs (i, bi, tf ntm (nty+1) tm)
+  
+  (* Convenience *)
+  | TmIfThenElse (i,            b,            t,            e)    ->
+    TmIfThenElse (i, tf ntm nty b, tf ntm nty t, tf ntm nty e)
 
-let cs_shift n d cs = match cs with
-  | SiEq (s1, s2) -> SiEq (si_shift n d s1, si_shift n d s2)
-
-(* Types *)
-
-(* Primitive types *)
-type ty_prim =
-    PrimNum
-  | PrimInt
-  | PrimUnit
-  | PrimBool
-  | PrimString
-  | PrimClipped
-  | PrimDBS
-
-(* Types with one argument *)
-(* XXX: Extend to types with n-ary arguments *)
-type ty_prim1 =
-    Prim1Set
-  | Prim1Bag
-  | Prim1Fuzzy
-
-(* Strings in the binders just for debug purposes *)
-type ty =
-  (* variables used in bindings *)
-    TyVar  of var_info
-
-  (* Primitive types *)
-  | TyPrim  of ty_prim
-  | TyPrim1 of (ty_prim1 * ty)
-
-  (* ADT *)
-  | TyUnion     of ty * ty
-  | TyTensor    of ty * ty
-  | TyAmpersand of ty * ty
-
-  (* Functional type *)
-  | TyLollipop of ty * si * ty
-
-  (* Fixpoint type *)
-  | TyMu of binder_info * ty
-
-  (* Quantified types *)
-  | TyForall of binder_info * kind * ty
 
 
-(* map over types, first argument: action on vars, second argument
-   action on evars, third argument action on sensitivities, 4th on sizes *)
-let rec ty_map n fv fsi ty = match ty with
-    TyVar v                 -> fv n v
-  | TyPrim tp               -> TyPrim tp
-  | TyPrim1 (tp, ty)        -> TyPrim1 (tp, ty_map n fv fsi ty)
-  (* ADT *)
-  | TyUnion(ty1, ty2)       -> TyUnion    (ty_map n fv fsi ty1, ty_map n fv fsi ty2)
-  | TyTensor(ty1, ty2)      -> TyTensor   (ty_map n fv fsi ty1, ty_map n fv fsi ty2)
-  | TyAmpersand(ty1, ty2)   -> TyAmpersand(ty_map n fv fsi ty1, ty_map n fv fsi ty2)
-  (* *)
-  | TyLollipop(ty1, s, ty2) -> TyLollipop(ty_map n fv fsi ty1, fsi n s, ty_map n fv fsi ty2)
 
-  | TyMu(b, ty)             -> TyMu(b, ty_map (n+1) fv fsi ty)
-  (* *)
-  | TyForall(b, k, ty)      -> TyForall(b, k, ty_map (n+1) fv fsi ty)
+(* ---------------------------------------------------------------------- *)
+(* Convenient functions *)
 
-let ty_shift o n ty =
+
+
+(* Shift all of the type variables by the given amount *)
+let rec ty_shiftTy (o : int) (n : int) (ty : ty) : ty = 
   let fv  k v  = TyVar (var_shift k n v)      in
-  let fsi k si = si_shift k n si              in
+  let fsi k si = si_shiftTy k n si            in
   ty_map o fv fsi ty
 
-let ty_subst_shift x t k v =
-  if (x+k) = v.v_index then
-    (ty_shift 0 k t)
-  else
-    TyVar (var_shift (x+k) (-1) v)
+and si_shiftTy (o : int) (n : int) (si : si) : si =
+  si_map (tm_shiftTy o n) si
 
-(* Substitution ty[t/x] for type vars *)
-let ty_subst x t ty =
-  let f_si k si = si_shift (x + k) (-1) si in
-  let f_ty      = ty_subst_shift x t       in
-  ty_map 0 f_ty f_si ty
+and tm_shiftTy (o : int) (n : int) (tm : term) : term = 
+  let fv _ _ i v = TmVar(i,v)          in
+  let fty _ k ty = ty_shiftTy k n ty in
+  let fsi _ k si = si_shiftTy k n si in
+  tm_map 0 o fv fty fsi tm
 
+
+(* Shift all of the regular variables by the given amount *)
+let rec tm_shiftTm (o : int) (n : int) (tm : term) : term = 
+  let fv  k _ i v = TmVar (i, var_shift k n v) in
+  let fty k _ ty = ty_shiftTm k n ty         in
+  let fsi k _ si = si_shiftTm k n si         in
+  tm_map o 0 fv fty fsi tm
+
+and ty_shiftTm (o : int) (n : int) (ty : ty) : ty = 
+  let fv _ v = TyVar v  in
+  ty_map o fv (si_shiftTm n) ty
+
+and si_shiftTm (o : int) (n : int) (si : si) : si =
+  si_map (tm_shiftTm o n) si
+
+
+
+
+(* This performs a substitution of the form ty[t/x] for type variables.
+   It can be called on types (ty_substTy) or terms (tm_substTy).  *)
+let rec ty_substTy
+    (t : ty)    (* The type to replace the variable with. *)
+    (ktm : int) (* Initially, call with 0. *)
+    (x : int)   (* The Debruijn index of the type variable we are replacing. *)
+    (ty : ty)   (* The input type over which we are doing the substitution. *)
+    : ty =
+  let fv kty v = 
+    if kty = v.v_index then
+      ty_shiftTm 0 ktm (ty_shiftTy 0 (kty-x) t)
+    else
+      TyVar (var_shift kty (-1) v)    in
+  let fsi k si = si_substTy t ktm k si  in
+  ty_map x fv fsi ty
+
+and si_substTy (t : ty) (ktm : int) (x : int) (si : si) : si =
+  si_map (tm_substTy t ktm x) si
+
+and tm_substTy (t : ty) (ktm : int) (x : int) (tm : term) : term =
+  let fv _ _ i v = TmVar(i,v) in
+  tm_map ktm x fv (ty_substTy t) (si_substTy t) tm
+
+
+
+(* ty_unfold is used to unfold mu types *)
 let ty_unfold ty = match ty with
-  | TyMu(b, ty_i) -> ty_subst 0 (TyMu (b, ty_i)) ty_i
+  | TyMu(b, ty_i) -> ty_substTy (TyMu (b, ty_i)) 0 0 ty_i
   | _             -> ty
 
-(*********************************************************************)
-(* Terms                                                             *)
 
-(* Primitive Terms *)
-type term_prim =
-    PrimTUnit
-  | PrimTNum    of float
-  | PrimTInt    of int
-  | PrimTBool   of bool
-  | PrimTString of string
-  | PrimTFun    of string * ty
-  | PrimTDBS    of string
+(* This performs a substitution of the form tm[t/x] for variables. *)
+let rec tm_substTm
+    (t : term)  (* The term to replace the variable with. *)
+    (x : int)   (* The Debruijn index of the variable we are replacing. *)
+    (kty : int) (* Initially, call with 0. *)
+    (tm : term) (* The input term over which we are doing the substitution. *)
+    : term =
+  let fv ktm kty i v = if ktm = v.v_index
+    then tm_shiftTy 0 kty (tm_shiftTm 0 (ktm-x) t)
+    else TmVar (i, var_shift ktm (-1) v) in
+  let fty k kty ty = ty_substTm t k kty ty  in
+  let fsi k kty si = si_substTm t k kty si  in
+  tm_map x kty fv fty fsi tm
 
-let type_of_prim t = match t with
-    PrimTUnit       -> TyPrim PrimUnit
-  | PrimTNum _      -> TyPrim PrimNum
-  | PrimTInt _      -> TyPrim PrimInt
-  | PrimTBool _     -> TyPrim PrimBool
-  | PrimTString  _  -> TyPrim PrimString
-  | PrimTFun(_, ty) -> ty
-  | PrimTDBS _      -> TyPrim PrimDBS
-
-type term =
-  | TmVar of info * var_info
-  (* Primitive terms *)
-  | TmPrim     of info * term_prim
-
-  | TmPair      of info * term * term
-  | TmTensDest  of info * binder_info * binder_info * term * term
-  (* & constructor *)
-  | TmAmpersand of info * term * term
-  | TmUnionCase of info * term * binder_info * term * binder_info * term
-  (*                      t  of { inl(x)     => tm1  | inl(y)     => tm2  } *)
-
-  (* Regular Abstraction and Applicacion *)
-  | TmApp of info * term * term
-  | TmAbs of info * binder_info * (si * ty) * ty option * term
-
-  (* Recursive data types *)
-  | TmFold    of info * ty * term
-  | TmUnfold  of info * term
-
-  (* Bindings *)
-  | TmLet      of info * binder_info * si * term * term
-  | TmLetRec   of info * binder_info * ty * term * term
-  | TmSample   of info * binder_info * term * term
-
-  (* Type Abstraction and Applicacion *)
-  | TmTyAbs of info * binder_info * kind * term
-  | TmTyApp of info * term * ty
-
-  (* Type definitions *)
-  | TmTypedef of info * binder_info * ty * term
+and ty_substTm (t : term) (x : int) (kty : int) (ty : ty) : ty = 
+  let fv _ v = TyVar v in
+  ty_map kty fv (si_substTm t x) ty
+and si_substTm (t : term) (x : int) (kty : int) (si : si) : si = 
+  si_map (tm_substTm t x kty) si
 
 
-let map_prim_ty n f p =
-  match p with
-    PrimTUnit       -> p
-  | PrimTNum(_)     -> p
-  | PrimTInt(_)     -> p
-  | PrimTBool(_)    -> p
-  | PrimTString(_)  -> p
-  | PrimTFun(s, ty) -> PrimTFun(s, f n ty)
-  | PrimTDBS _      -> p
-
-let rec map_term_ty_aux n ft fsi tm =
-  let tf n = map_term_ty_aux n ft fsi                  in
-  let opf  = Option.map (ft n)                         in
-  let psf = (fun (si, ty) -> (fsi n si, ft n ty))      in
-  (* let opsf = Option.map (fun (si, ty) -> (si, f n ty)) in *)
-  match tm with
-    TmVar(i, v)                -> TmVar (i, v)
-  | TmPrim(i, p)               -> TmPrim(i, map_prim_ty n ft p)
-
-  (* Will die soon *)
-  | TmPair(i,      tm1,      tm2)    ->
-    TmPair(i, tf n tm1, tf n tm2)
-
-  | TmTensDest(i, bi_x, bi_y,      tm,      tm_i) ->
-    TmTensDest(i, bi_x, bi_y, tf n tm, tf n tm_i)
-
-  | TmAmpersand(i,      tm1,      tm2)    ->
-    TmAmpersand(i, tf n tm1, tf n tm2)
-
-  | TmUnionCase(i,      tm, bi_l,      tm_l, bi_r,      tm_r)  ->
-    TmUnionCase(i, tf n tm, bi_l, tf n tm_l, bi_r, tf n tm_r)
-
-  (* Abstraction and application *)
-  | TmAbs(i, bi,      osity,     orty,      tm)           ->
-    TmAbs(i, bi,  psf osity, opf orty, tf n tm)
-
-  | TmApp(i,      tm1,      tm2)          ->
-    TmApp(i, tf n tm1, tf n tm2)
-
-  (*  *)
-  | TmLet(i, bi,       si,      tm,      tm_i)      ->
-    TmLet(i, bi, fsi n si, tf n tm, tf n tm_i)
-
-  | TmLetRec(i, bi,      ty,      tm,      tm_i) ->
-    TmLetRec(i, bi, ft n ty, tf n tm, tf n tm_i)
-
-  | TmSample(i, bi,      tm,      tm_i) ->
-    TmSample(i, bi, tf n tm, tf n tm_i)
-
-  (* Recursive datatypes *)
-  | TmFold(i,      ty,      tm)           ->
-    TmFold(i, ft n ty, tf n tm)
-
-  | TmUnfold(i,      tm) ->
-    TmUnfold(i, tf n tm)
-
-  (* Type definition! *)
-  | TmTypedef(i, bi,          ty,          tm)        ->
-    TmTypedef(i, bi, ft (n+1) ty, tf (n+1) tm)
-
-  (* Type abstraction and application *)
-  | TmTyApp (i,      tm,      ty)     ->
-    TmTyApp (i, tf n tm, ft n ty)
-
-  | TmTyAbs (i, bi, k,          tm)  ->
-    TmTyAbs (i, bi, k, tf (n+1) tm)
+(* (* A special substitution just for type definitions. *)
+let typedef_subst t x tm = 
+  let tsub  k = ty_substTy (ty_shiftTy 0 (k-1) t) (x+k) in
+  let sisub k = si_shiftTy k (-1)  in
+  tm_mapTy 0 tsub sisub tm
+*)
 
 
-let map_term_ty fty fsi tm = map_term_ty_aux 0 fty fsi tm
-
-(* Substitution of annotations in expressions *)
-
-(* tm[t/x] *)
-let term_ty_subst x t tm =
-  let tsub  k = ty_subst (x+k) (ty_shift 0 (k-1) t) in
-  let sisub k = si_shift k (-1)  in
-  map_term_ty tsub sisub tm
 
 (************************************************************************)
 (* File info extraction *)
@@ -314,11 +262,16 @@ let term_ty_subst x t tm =
 let tmInfo t = match t with
     TmVar(fi, _)                -> fi
   | TmPrim(fi, _)               -> fi
+  | TmPrimFun(fi, _, _, _)      -> fi
+  
+  | TmBag(fi, _, _)             -> fi
 
   | TmPair(fi, _, _)            -> fi
   | TmTensDest(fi,_,_,_,_)      -> fi
 
   | TmAmpersand(fi,_,_)         -> fi
+  | TmLeft(fi,_,_)              -> fi
+  | TmRight(fi,_,_)             -> fi
   | TmUnionCase(fi,_,_,_,_,_)   -> fi
 
   (* Abstraction and application *)
@@ -336,7 +289,10 @@ let tmInfo t = match t with
 
   (* Type abstraction and application *)
   | TmTyApp (fi, _, _)          -> fi
-  | TmTyAbs (fi, _, _, _)       -> fi
+  | TmTyAbs (fi, _, _)          -> fi
 
   (* Misc *)
   | TmTypedef(fi,_,_,_)         -> fi
+
+  (* Convenience *)
+  | TmIfThenElse (fi,_,_,_)     -> fi

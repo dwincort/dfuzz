@@ -6,6 +6,7 @@
 */
 %{
 
+open Types
 open Syntax
 
 open Support.FileInfo
@@ -17,9 +18,6 @@ let parser_info    fi = Support.Error.message   2 Support.Options.Parser fi
 let si_zero  = SiConst 0.0
 let si_one   = SiConst 1.0
 let si_infty = SiInfty
-let dummy_ty  = TyPrim PrimUnit
-
-let rec int_to_speano n = if n = 0 then SiZero else SiSucc (int_to_speano (n-1))
 
 (* look for a variable in the current context *)
 let existing_var fi id ctx =
@@ -29,16 +27,21 @@ let existing_var fi id ctx =
 
 let existing_tyvar fi id ctx =
   match Ctx.lookup_tyvar id ctx with
-      None            -> parser_error fi "Type %s is unbound" id
-    | Some (var, bi)  -> (var, bi)
+      None      -> parser_error fi "Type %s is unbound" id
+    | Some var  -> var
+
+let dummyTy = TyPrim PrimUnit
 
 (* Wrap extend here in order to avoid mutually recursive
    dependencies *)
+(* TODO: Do these really need to be wrapped?
+   More importantly, let's use the non-primed version of these Ctx 
+   functions and get the sizes right in the binders (see below). *)
 let extend_var id ctx =
-  Ctx.extend_var id dummy_ty ctx
+  Ctx.extend_ctx_with_var' id dummyTy ctx
 
-let extend_ty_var id ki ctx =
-  Ctx.extend_ty_var id ki ctx
+let extend_ty_var id ctx =
+  Ctx.extend_ctx_with_tyvar' id ctx
 
 (* Create a new binder *)
 (* TODO: set the proper b_size !!! *)
@@ -48,8 +51,8 @@ let nb_tyvar n = {b_name = n; b_type = BiTyVar; b_size = -1; b_prim = false;}
 
 (* From a list of arguments to a type *)
 let rec qf_to_type qf ty = match qf with
-    []               -> ty
-  | (_, n, k) :: qfl -> TyForall(nb_tyvar n, k, qf_to_type qfl ty)
+    []              -> ty
+  | (_, n) :: qfl   -> TyForall(nb_tyvar n, qf_to_type qfl ty)
 
 let rec list_to_type l ret_ty = match l with
     []                        -> TyLollipop (TyPrim PrimUnit, si_infty, ret_ty) (* Not yet allowed constant function *)
@@ -61,9 +64,8 @@ let from_args_to_type qf arg_list ret_ty =
 
 (* From a list of arguments to a term *)
 let rec qf_to_term qf tm = match qf with
-    []               -> tm
-  | (i, n, k) :: qfl ->
-      TmTyAbs (i, nb_tyvar n, k, qf_to_term qfl tm)
+    []              -> tm
+  | (i, n) :: qfl   -> TmTyAbs (i, nb_tyvar n, qf_to_term qfl tm)
 
 let rec list_to_term l body = match l with
     []                    -> body
@@ -71,6 +73,10 @@ let rec list_to_term l body = match l with
 
 let from_args_to_term qf arg_list body =
   qf_to_term qf (list_to_term arg_list body)
+
+let rec args_to_args_list fi arg_list ctx = match arg_list with
+  | []      -> []
+  | (ty, si, n, i) :: arg_list' -> TmVar(fi, existing_var fi n ctx) :: args_to_args_list fi arg_list' ctx
 
 let mk_infix ctx info op t1 t2 =
   match Ctx.lookup_var op ctx with
@@ -99,7 +105,7 @@ let mk_prim_ty_app ctx info prim arglist =
 let mk_lambda info bi oty term = TmAbs(info, bi, oty, None, term)
 
 let rec remove_quantifiers ty = match ty with
-    TyForall(_,_,ty_i) -> remove_quantifiers ty_i
+    TyForall(_,ty_i) -> remove_quantifiers ty_i
   | _ -> ty
 
 %}
@@ -170,7 +176,6 @@ let rec remove_quantifiers ty = match ty with
 %token <Support.FileInfo.info> TYPE
 %token <Support.FileInfo.info> FORALL
 %token <Support.FileInfo.info> CLIPPED
-%token <Support.FileInfo.info> DBSOURCE
 %token <Support.FileInfo.info> INT
 %token <Support.FileInfo.info> DOT
 %token <Support.FileInfo.info> ZERO
@@ -187,7 +192,7 @@ let rec remove_quantifiers ty = match ty with
 /* ---------------------------------------------------------------------- */
 
 %start body
-%type < Syntax.term > body
+%type < Types.term > body
 %%
 
 /* ---------------------------------------------------------------------- */
@@ -223,17 +228,19 @@ Term :
   | TYPEDEF ID EQUAL Type SEMI Term
       {
         fun ctx ->
-        let ctx_let = extend_ty_var $2.v Star ctx in
+        let ctx_let = extend_ty_var $2.v ctx in
         TmTypedef($1, (nb_tyvar $2.v), $4 ctx_let, $6 ctx_let)
       }
   | PRIMITIVE ID Quantifiers Arguments COLON Type LBRACE PrimSpec RBRACE Term
       { fun ctx ->
-        let (qf,   ctx_qf)   = $3 ctx                                              in
-        let (args, ctx_args) = $4 ctx_qf                                           in
-        let f_type           = from_args_to_type qf args ($6 ctx_args)             in
-        let ctx_f_outer      = extend_var $2.v ctx                                 in
-        let tm_prim          = TmPrim($8.i, PrimTFun($8.v, f_type))                in
-        TmLet($1, (nb_prim $2.v), si_infty, tm_prim, $10 ctx_f_outer)
+        let ctx_let          = extend_var $2.v ctx                          in
+        let (qf,   ctx_qf)   = $3 ctx                                       in
+        let (args, ctx_args) = $4 ctx_qf                                    in
+        let arglst           = args_to_args_list $1 args ctx_args           in
+        let body             = TmPrimFun($8.i, $8.v, $6 ctx_args, arglst)   in
+        let f_term           = from_args_to_term qf args body               in
+        
+        TmLet($1, nb_prim $2.v, si_infty, f_term, $10 ctx_let)
       }
   | FUNCTION ID Quantifiers Arguments COLON Type LBRACE Term RBRACE Term
       {
@@ -271,13 +278,13 @@ Expr :
       LogOrTerm
       { $1 }
 
-LogOrTerm :
+LogOrTerm : /* Logical Or Term */
     LogOrTerm OR LogAndTerm
       { fun ctx -> mk_infix ctx $2 "op_lor" ($1 ctx) ($3 ctx) }
   | LogAndTerm
       { $1 }
 
-LogAndTerm:
+LogAndTerm: /* Logical And Term */
     LogAndTerm AND BequalTerm
       { fun ctx -> mk_infix ctx $2 "op_land" ($1 ctx) ($3 ctx) }
   | BequalTerm
@@ -334,16 +341,8 @@ FTerm :
       { $1 }
 
 STerm :
-    IF Expr THEN LBRACK Type RBRACK LBRACE Term RBRACE ELSE LBRACE Term RBRACE
-      { fun ctx ->
-        let if_then_spec = mk_prim_ty_app ctx $1 "if_then_else" [$5 ctx] in
-        let arg_list    = [$2 ctx;
-                           TmAmpersand($6,
-                                       mk_lambda $7  (nb_var "thunkThen") (si_one, TyPrim PrimUnit) ($8  (extend_var "_" ctx)),
-                                       mk_lambda $11 (nb_var "thunkElse") (si_one, TyPrim PrimUnit) ($12 (extend_var "_" ctx)));] in
-        mk_prim_app_args $1 if_then_spec (List.rev arg_list)
-      }
-
+    IF Expr THEN LBRACE Term RBRACE ELSE LBRACE Term RBRACE
+      { fun ctx -> TmIfThenElse($1, $2 ctx, $5 ctx, $9 ctx) }
   | UNIONCASE Expr OF LBRACE INL LPAREN ID RPAREN DBLARROW Term PIPE INR LPAREN ID RPAREN DBLARROW Term RBRACE
       { fun ctx ->
         let ctx_l = extend_var $7.v  ctx in
@@ -351,22 +350,19 @@ STerm :
         TmUnionCase($1, $2 ctx, nb_var $7.v, $10 ctx_l, nb_var $14.v, $17 ctx_r) }
 
   | FUN LPAREN ID SensType RPAREN MaybeType LBRACE Term RBRACE
-      { fun ctx -> TmAbs($1, nb_var $3.v, $4 ctx, $6 ctx, $8 (extend_var $3.v ctx )) }
+      { fun ctx -> TmAbs($1, nb_var $3.v, $4 ctx, $6 ctx, $8 (extend_var $3.v ctx)) }
+  | INL AT LBRACK Type RBRACK AT LBRACK Type RBRACK LBRACE Term RBRACE
+      { fun ctx -> TmLeft($1, $11 ctx, $8 ctx)  }
+  | INR AT LBRACK Type RBRACK AT LBRACK Type RBRACK LBRACE Term RBRACE
+      { fun ctx -> TmRight($1, $11 ctx, $4 ctx)  }
   | FExpr
       { $1 }
 
 FExpr :
-    SFExpr
-      { $1 }
-  | FExpr SFExpr
-      { fun ctx -> let e1 = $1 ctx in let e2 = $2 ctx in TmApp(tmInfo e1, e1, e2) }
-
-/* Sensitivity application */
-SFExpr:
     TFExpr
       { $1 }
-/*  | SFExpr LBRACK SensTerm RBRACK
-      { fun ctx -> TmSiApp($2, $1 ctx, $3 ctx) } */
+  | FExpr TFExpr
+      { fun ctx -> let e1 = $1 ctx in let e2 = $2 ctx in TmApp(tmInfo e1, e1, e2) }
 
 /* Type application */
 TFExpr:
@@ -391,10 +387,6 @@ AExpr:
       { fun _cx -> TmPrim ($1, PrimTUnit) }
   | ID
       { fun ctx -> TmVar($1.i, existing_var $1.i $1.v ctx) }
-  | INL
-      { fun ctx -> mk_prim_app ctx $1 "p_inl" []  }
-  | INR
-      { fun ctx -> mk_prim_app ctx $1 "p_inr" []  }
   | LPAREN Term RPAREN
       { $2 }
   | LPAREN PairSeq RPAREN
@@ -410,28 +402,10 @@ AExpr:
 
 /* Sensitivities and sizes */
 SensTerm :
-    SensTerm ADD SensMulTerm
-      { fun ctx -> SiAdd($1 ctx, $3 ctx) }
-  | SensMulTerm
-      { $1 }
-
-SensMulTerm :
-    SensMulTerm MUL SensAtomicTerm
-      { fun ctx -> SiMult($1 ctx, $3 ctx) }
-  | SensAtomicTerm
-      { $1 }
-
-SensAtomicTerm :
-    ID
-      { fun ctx -> let (v, k) = existing_tyvar $1.i $1.v ctx in
-                   match k with
-                   | Star -> parser_error $1.i "Cannot bind a type variable in sensitivity"
-                   | _    -> SiVar v
-      }
+    LBRACK Term RBRACK
+      { fun ctx -> SiTerm ($2 ctx) }
   | INTV
-      { fun _cx ->
-        (int_to_speano $1.v)
-      }
+      { fun _cx -> SiConst (float_of_int $1.v) }
   | FLOATV
       { fun _cx -> SiConst $1.v }
 
@@ -440,6 +414,8 @@ SensType :
       { fun ctx -> ($2 ctx, $3 ctx) }
 
 SensAnn :
+    /* nothing */
+      { fun _cx -> si_infty }
   | COLON MaybeSensitivity
       { fun ctx -> $2 ctx }
 
@@ -451,28 +427,13 @@ MaybeSensitivity:
   | LBRACK SensTerm RBRACK
       { $2 }
 
-/* Binding type */
-Kind :
-    SIZE
-      { Size }
-  | TYPE
-      { Star }
-  | SENS
-      { Sens }
-
-KindAnn :
-    ID
-      { fun ctx -> ([($1.i, $1.v, Star)], extend_ty_var $1.v Star ctx) }
-  | ID COLON Kind
-      { fun ctx -> ([($1.i, $1.v, $3)],   extend_ty_var $1.v $3 ctx) }
-
 QuantifierList :
-    KindAnn
-      { $1 }
-  | KindAnn COMMA QuantifierList
-      { fun ctx -> let (tyv, ctx')  = $1 ctx  in
-                   let (qf, ctx_qf) = $3 ctx' in
-                   (tyv @ qf, ctx_qf)
+    ID
+      { fun ctx -> ([($1.i, $1.v)], extend_ty_var $1.v ctx) }
+  | ID COMMA QuantifierList
+      { fun ctx -> let ctx' = extend_ty_var $1.v ctx in
+                   let (qlst, ctx'') = $3 ctx' in
+                   (($1.i, $1.v) :: qlst, ctx'')
       }
 
 Quantifiers :
@@ -487,12 +448,10 @@ MaybeType:
       {fun ctx -> Some ($2 ctx)}
 
 Type :
-    AType SET
-      { fun ctx -> TyPrim1 (Prim1Set, ($1 ctx)) }
-  | AType BAG
+    AType BAG
       { fun ctx -> TyPrim1 (Prim1Bag, ($1 ctx)) }
   | MU ID DBLARROW Type
-      { fun ctx -> TyMu(nb_tyvar $2.v, $4 (extend_ty_var $2.v Star ctx)) }
+      { fun ctx -> TyMu(nb_tyvar $2.v, $4 (extend_ty_var $2.v ctx)) }
   | ComplexType
       { $1 }
 
@@ -520,9 +479,7 @@ AType :
     LPAREN Type RPAREN
       { $2 }
   | ID
-      { fun ctx -> let (v, _) = existing_tyvar $1.i $1.v ctx in
-                   TyVar v
-      }
+      { fun ctx -> TyVar (existing_tyvar $1.i $1.v ctx) }
   | BOOL
       { fun _cx -> TyPrim PrimBool }
   | NUM
@@ -533,8 +490,6 @@ AType :
       { fun _cx -> TyPrim PrimString }
   | CLIPPED
       { fun _cx -> TyPrim PrimClipped }
-  | DBSOURCE
-      { fun _cx -> TyPrim PrimDBS }
   | LPAREN RPAREN
       { fun _cx -> TyPrim PrimUnit }
   | LPAREN TPairSeq RPAREN

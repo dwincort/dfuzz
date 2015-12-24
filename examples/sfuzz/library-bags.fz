@@ -13,26 +13,33 @@
 //////////////////////////////////////////////////////////////////////
 // Primitives (built-in)
 
+/*
+  emptybag : () -> A bag
+  
+  Creates an empty bag.
+*/
 primitive emptybag forall(A) (x : ()) : A bag { "emptybag" }
 
+/*
+  addtobag : A -o A bag -o A bag
+  
+  Adds the element to the bag.
+*/
 primitive addtobag forall(A) (x :[] A) (xs :[] A bag) : A bag { "addtobag" }
 
-function listtobag forall(A) (lst :[] list(A)) : A bag {
-  case (unfold lst) of {
-    inl(unit) => emptybag@[A] ()
-  | inr(xxs)  => let (x,xs) = xxs;
-                 addtobag@[A] x (listtobag@[A] xs)
-  }
-}
-
+/*
+  bagjoin : A bag -o A bag -o A bag
+  
+  Unions two bags together into a new bag.
+*/
 primitive bagjoin forall(A) (b1 :[] A bag) (b2 :[] A bag) : A bag { "bagjoin" }
 
 
 /*
-  bagsize : A bag -o num Given a bag it returns the number of elements
-  in it.
+  bagsize : A bag -o num
+  
+  Given a bag it returns the number of elements in it.
 */
-
 primitive bagsize forall(A) (b :[] A bag) : num { "bagsize" }
 
 /*
@@ -43,7 +50,6 @@ primitive bagsize forall(A) (b :[] A bag) : num { "bagsize" }
   the test. The second argument (of type 'num') is the number ot steps
   we allow the function run.
 */
-
 primitive bagsplit
    forall(A)
    (pred : A -> bool)
@@ -56,21 +62,17 @@ primitive bagsplit
   This is an "ins"ensitive version of bagsplit, and as such, 
   it does not require a number-of-steps argument.
 */
-
 primitive bagsplitins
    forall(A)
    (pred : A -> bool)
    (b    : A bag) : ( A bag,  A bag ) { "bagsplitins" }
 
 /*
-  bagsum : (num bag) -o num
+  bagsum : (clipped bag) -o num
 
-  Returns the sum of the elements (clipped to the interval [-1,1]) of
-  the input bag.
+  Returns the sum of the elements of the bag.
 */
-
-primitive bagsum forall (A)
-	   (b :[] A bag) : num { "bagsum" }
+primitive bagsum (b :[] clipped bag) : num { "bagsum" }
 
 /*
   bagmap : (A -> B) -> num -> A bag -o B bag
@@ -79,7 +81,6 @@ primitive bagsum forall (A)
   on lists to the case of bags.  The second argument (of type 'num')
   is the number ot steps we allow the function to run.
 */
-
 primitive bagmap forall (A,B) (f : A -> B) (timeout : num) (a :[] A bag) : B bag { "bagmap" }
 
 /*
@@ -88,11 +89,23 @@ primitive bagmap forall (A,B) (f : A -> B) (timeout : num) (a :[] A bag) : B bag
   This is an "ins"ensitive version of bagmap, and as such, 
   it does not require a number-of-steps argument.
 */
-
 primitive bagmapins forall (A,B) (f : A -> B) (a : A bag) : B bag { "bagmapins" }
 
 //////////////////////////////////////////////////////////////////////
 // Utilities
+
+/*
+  listtobag : list(A) -o A bag
+  
+  Takes an ordered list and converts it into the less structured bag type.
+*/
+function listtobag forall(A) (lst :[] list(A)) : A bag {
+  case (unfold lst) of {
+    inl(unit) => emptybag@[A] ()
+  | inr(xxs)  => let (x,xs) = xxs;
+                 addtobag@[A] x (listtobag@[A] xs)
+  }
+}
 
 /*
   bagfilter : (A -> Bool) -> num -> A bag -o A bag
@@ -100,7 +113,6 @@ primitive bagmapins forall (A,B) (f : A -> B) (a : A bag) : B bag { "bagmapins" 
   Returns a bag containing the elements of the input bag passing the
   test (the first argument).
 */
-
 function bagfilter forall (A) (test: A -> bool) (timeout : num) (b:[] A bag) : A bag {
     let (yes, no) = bagsplit@[A] test timeout b;
     yes
@@ -111,7 +123,6 @@ function bagfilter forall (A) (test: A -> bool) (timeout : num) (b:[] A bag) : A
 
    bagpartition with counter
 */
-
 function bagpartition forall (A, K) (klist: list(K)) (timeout : num) (db :[] (K, A) bag) : list((K,A) bag) {
     case unfold klist of {
       inl(x) => nil((K,A) bag)

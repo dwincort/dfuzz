@@ -70,9 +70,6 @@ let reservedWords = [
   ("bool", fun i -> Parser.BOOL i);
   ("num", fun i -> Parser.NUM i);
   ("string", fun i -> Parser.STRING i);
-  ("db_source", fun i -> Parser.DBSOURCE i);
-  ("sens", fun i -> Parser.SENS i);
-  ("size", fun i -> Parser.SIZE i);
   ("type", fun i -> Parser.TYPE i);
   ("forall", fun i -> Parser.FORALL i);
   ("int", fun i -> Parser.INT i);

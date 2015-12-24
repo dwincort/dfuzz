@@ -6,24 +6,19 @@
 *)
 open Unix
 
-open Ctx
-open Syntax
-open Backend
+open Types
 
 open Support.Options
 open Support.Error
 
-let outfile    = ref (None : string option)
 let infile     = ref ("" : string)
 
 let argDefs = [
-  "-o",                Arg.String (fun s -> outfile := Some s),        "File to write the generated code to" ;
-
   "-v",                Arg.Int  (fun l  -> debug_options := {!debug_options with level = l} ),       "Set printing level to n (1 Warning [2 Info], 3+ Debug)" ;
   "--verbose",         Arg.Int  (fun l  -> debug_options := {!debug_options with level = l} ),       "Set printing level to n (1 Warning [2 Info], 3+ Debug)" ;
 
   "--disable-types",   Arg.Unit (fun () -> comp_disable TypeChecker ), "Disable type checking and inference" ;
-  "--disable-codegen", Arg.Unit (fun () -> comp_disable Backend     ), "Disable code generation" ;
+  "--disable-interp",  Arg.Unit (fun () -> comp_disable Interpreter ), "Disable interpreter" ;
 
   "--disable-unicode", Arg.Unit (fun () -> debug_options := {!debug_options with unicode = false} ), "Disable unicode printing" ;
   "--enable-annot",    Arg.Unit (fun () -> debug_options := {!debug_options with pr_ann  = true} ),  "Enable printing of type annotations" ;
@@ -70,28 +65,19 @@ let parse file =
 (* Main must be db_source -> fuzzy string *)
 let check_main_type ty =
   match ty with
-  | TyLollipop (TyPrim PrimDBS, _, TyPrim1 (Prim1Fuzzy, TyPrim PrimString)) -> ()
-  | _ -> main_error dp "The type of the program must be db_source -o[?] fuzzy string"
-
-(* module WS = WhySolver *)
+  | TyPrim PrimString -> ()
+  | _ -> main_error dp "The type of the program must be string"
 
 let type_check program =
-  let ty = Ty_bi.get_type program  in
+  let ty = Tycheck.get_type false program  in
 
   main_info  dp "Type of the program: @[%a@]" Print.pp_type ty;
+  
+  if comp_enabled Interpreter then check_main_type ty else ()  
 
-  ()
-
-  (* Disabled as we don't run the programs for now *)
-  (* check_main_type ty *)
-
-let gen_caml program outfile =
-  let out  = open_out outfile in
-  let ofmt = Format.formatter_of_out_channel out in
-  Backend.gen_program ofmt program
 
 (* Must use this *)
-let get_tty_size = ()
+(* let get_tty_size = () *)
 
 (* === The main function === *)
 let main () =
@@ -125,23 +111,10 @@ let main () =
   if comp_enabled TypeChecker then
     type_check program;
 
-  if comp_enabled Backend then
-    match !outfile with
-    | None       -> main_warning dp "No executable was specified, use -o to generate an executable file"
-    | Some out_f ->
-      let out_ml  = out_f ^ ".ml"   in
-      let out_exe = out_f ^ ".byte" in
-      (* let out_exe = out_f ^ ".native" in *)
-      let command = "ocamlbuild -I runtime -libs str -cflag '-rectypes' " ^ out_exe in
-
-     (* let command = "ocamlfind ocamlc -package str -linkpkg -w -A -rectypes -I runtime/ prim.cmo bag.cmo db_sources.cmo init.cmo " ^ out_ml ^ " -o " ^ out_f in *)
-      gen_caml program out_ml;
-
-      main_info dp "Compiling: %s" command;
-      let _caml_exit = Sys.command command             in
-      let _caml_exit = Sys.command "rm -f *.cmo *.cmi" in
-      main_info dp "Executable: %s generated" out_exe;
-      ()
+  if comp_enabled Interpreter then
+    let outputStr = Interpreter.run_interp program Prim.prim_list in
+    main_info dp "The result of the program: %s" outputStr;
+  ()
 
 (* === Call the main function and catch any exceptions === *)
 

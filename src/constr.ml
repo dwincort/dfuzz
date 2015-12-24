@@ -1,6 +1,11 @@
-open Syntax
+open Types
 
 let rec si_simpl (si : si) : si = match si with
+  | SiTerm (t) -> (match t with
+      | TmPrim(_, PrimTNum(f)) -> SiConst f
+      | TmPrim(_, PrimTInt(i)) -> SiConst (float_of_int i)
+      | TmPrim(_, PrimTBool(b)) -> if b then SiInfty else SiZero
+      | _ -> si)
   | SiAdd (si1, si2)  ->
     let si1' = si_simpl si1 in
     let si2' = si_simpl si2 in
@@ -16,10 +21,8 @@ let rec si_simpl (si : si) : si = match si with
     let si2' = si_simpl si2 in
     begin
       match si1', si2' with
-      | SiConst 1.0,   y
-      | SiSucc SiZero, y      -> y
-      | x, SiConst 1.0
-      | x, SiSucc SiZero      -> x
+      | SiConst 1.0, y        -> y
+      | x, SiConst 1.0        -> x
       | SiConst x, SiConst y  -> SiConst (x *. y)
       | _, _                  -> SiMult (si1', si2')
     end

@@ -4,25 +4,22 @@
    LICENSE: 3-clause BSD style.
    See the LICENSE file for details on licensing.
 *)
-open Syntax
-
-(* Contexts of type 'a *)
-type 'a ctx = (var_info * 'a) list
-
-type context =
-    {
-      var_ctx   : ty ctx;
-      tyvar_ctx : kind ctx;
-      cs_ctx    : si_cs list;
-    }
+open Types
 
 val empty_context : context
 
-val extend_var   : string -> ty -> context -> context
-val extend_ty_var : string -> kind -> context -> context
-
-val access_var    : context -> int -> var_info * ty
-
 (* Name based functions for the parser *)
 val lookup_var   : string -> context -> (var_info * ty) option
-val lookup_tyvar : string -> context -> (var_info * kind) option
+val lookup_tyvar : string -> context -> var_info option
+
+val extend_ctx_with_var     : string -> ty -> context -> (int * context)
+val extend_ctx_with_tyvar   : string -> context -> (int * context)
+
+val extend_ctx_with_var'    : string -> ty -> context -> context
+val extend_ctx_with_tyvar'  : string -> context -> context
+
+val access_var      : context -> int -> (var_info * ty)
+val access_tyvar    : context -> int -> var_info
+
+val modify_var : int -> ((var_info * ty) -> (var_info * ty))
+    -> context -> context
