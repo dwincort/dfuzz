@@ -7,6 +7,7 @@
 *)
 open Format
 
+open Print
 open Types
 open Syntax
 
@@ -24,12 +25,12 @@ let interp_info2   fi = Err.message 3 Opt.Interpreter fi
 let interp_debug   fi = Err.message 4 Opt.Interpreter fi
 let interp_debug2  fi = Err.message 5 Opt.Interpreter fi
 let interp_debug3  fi = Err.message 6 Opt.Interpreter fi
+let interp_messageNoFi n = Err.message n Opt.Interpreter Support.FileInfo.dummyinfo
 
 
 
 (* State monad for the context for interpreting *)
 module InterpMonad = struct
-  open Print
   open Ctx
     
   let (>>=) (m : 'a interpreter) (f : 'a -> 'b interpreter) : 'b interpreter =
@@ -80,7 +81,7 @@ module InterpMonad = struct
       | _, ((_, Ok _) as res) -> res
       | None, ((_, Error _) as res) -> res
       | Some _, (db, Error s) -> begin
-        interp_info2 Support.FileInfo.dummyinfo "--- Skipping failure \"%s\"; reverting to state %a." s Print.pp_term tm;
+        interp_messageNoFi 4 "--- Skipping failure \"%s\"; reverting to state %a." s Print.pp_term tm;
         (db, Ok tm)
         end
   
@@ -102,17 +103,32 @@ module InterpMonad = struct
       | None    -> (db, Ok empty_context)
       | Some c  -> (db, Ok c)
   
-  let storeRedType (ty : ty) : bool interpreter =
-    (* FIXME: Implement this function *)
-    fun ((db, rlst), _, _) -> ((db, ty :: rlst), Ok true)
+  let attemptRedZone (sens : epsilon) : bool interpreter =
+    fun (db, _, _) -> match db with
+      | None -> (db, Error "**Interpreter** Tried to store a sensitivity when no DB was loaded")
+      | Some (db, eps, silist) -> let sum = List.fold_left (+.) 0. silist in
+            if sum +. sens > eps
+            then (Some (db, eps, (eps -. sum) :: silist), Ok false)
+            else (Some (db, eps, sens :: silist), Ok true)
   
   let getDB : term interpreter = 
-    fun ((db, _) as o, _, _) -> match db with
+    fun (o, _, _) -> match o with
       | None -> (o, Error "**Interpreter** No database loaded")
-      | Some d -> (o, Ok d)
+      | Some (db,_,_) -> (o, Ok db)
   
-  let storeDB (db : term) : unit interpreter = 
-    fun ((_, rlst), _, _) -> ((Some db, rlst), Ok ())
+  let storeDB (db : term) (budget : epsilon) : unit interpreter = 
+    fun (db_init, pe, _) -> match pe with
+      | None -> (Some (db, budget, []), Ok ())
+      | Some _ -> (interp_messageNoFi 1 "Trying to storeDB in red zone.  Quietly skipping ...";
+                  (db_init, Ok ()))
+  
+  let getDelta : float interpreter = 
+    return 0.0
+  
+  let getEpsilon : epsilon interpreter = 
+    fun (db, _, _) -> match db with
+      | None -> (db, Error "**Interpreter** Tried to get remaining epsilon budget when no DB was loaded")
+      | Some (_, eps, silist) -> (db, Ok (eps -. (List.fold_left (+.) 0. silist)))
   
   let getPrimDefs : ((string * primfun) list) interpreter = 
     fun (db, _, plst) -> (db, Ok plst)
@@ -127,14 +143,16 @@ end
 
 open InterpMonad
 
-
 (* val interp : term -> value interpreter *)
 let rec interp t = withFailTerm t @@ match t with
   | TmPrim(i,pt) -> return t
   
   | TmPrimFun(_i, s, ty, tmlst)  ->
-      lookup_prim s >>= fun f -> 
-      f (ty, tmlst)
+      if List.fold_left (fun b tm -> b && tmIsVal tm) true tmlst
+      then begin
+        lookup_prim s >>= fun f -> 
+        f (ty, tmlst)
+      end else fail @@ pp_to_string "**Interpreter** " "Unevaluated arguments in %a." pp_term t
   
   | TmVar(i,v) -> fail @@ "**Interpreter** Unexpected var: "^v.v_name
   
@@ -151,7 +169,7 @@ let rec interp t = withFailTerm t @@ match t with
       withFailTerm (TmTensDest(i, b1, b2, t', tBody))
       begin match t' with
         | TmPair (i', t1', t2') -> interp (tm_substTm t1' 0 0 (tm_substTm t2' 0 0 tBody))
-        | _ -> fail "**Interpreter** TensDest expected a pair but didn't find one"
+        | _ -> fail @@ pp_to_string "**Interpreter** " "TensDest expected a pair but found %a." pp_term t'
       end
   
   (* & constructor *)
@@ -160,17 +178,17 @@ let rec interp t = withFailTerm t @@ match t with
       interp t2 >>= fun t2' ->
       return @@ TmAmpersand (i, t1', t2')
   
-  | TmLeft (_i, _t, _ty)  -> return t
-  | TmRight(_i, _t, _ty)  -> return t
+  | TmLeft (i, t, ty)   -> interp t >>= fun t -> return (TmLeft (i, t, ty))
+  | TmRight(i, t, ty)   -> interp t >>= fun t -> return (TmRight(i, t, ty))
   
   | TmUnionCase(i, t, bl, tlBody, br, trBody) ->
       interp t >>= fun t' -> 
-      interp_info2 i "--- Interpreting a union of: %a" Print.pp_term t';
+      interp_debug i "--- Interpreting a union of: %a" Print.pp_term t';
       withFailTerm (TmUnionCase(i, t', bl, tlBody, br, trBody))
       begin match t' with
         | TmLeft (i',tl,_) -> interp (tm_substTm tl 0 0 tlBody)
         | TmRight(i',tr,_) -> interp (tm_substTm tr 0 0 trBody)
-        | _                -> fail "**Interpreter** Union expected a sum value but didn't find one"
+        | _                -> fail @@ pp_to_string "**Interpreter** " "Union expected a sum value but found %a" pp_term t'
       end
 
   (* Regular Abstraction and Applicacion *)
@@ -180,24 +198,26 @@ let rec interp t = withFailTerm t @@ match t with
      some way to represent this partial appliaction, so we actually do a 
      little type checking.  It's a little odd, but I believe it's the 
      most elegant solution. *)
-  | TmApp(i, tf, ta) -> interp_info2 i "--- Entering application interpretation: %a" Print.pp_term t;
+  | TmApp(i, tf, ta) -> interp_debug i "--- Entering application interpretation: %a" Print.pp_term t;
       interp ta >>= fun ta -> 
       interp tf >>= fun tf ->
-      interp_info2 i "--- Interpreting an application of %a with argument %a" Print.pp_term tf Print.pp_term ta;
+      interp_debug i "--- Interpreting an application of %a with argument %a" Print.pp_term tf Print.pp_term ta;
       withFailTerm (TmApp(i, tf, ta))
-      begin match tf with
-        | TmAbs(_,bi,_, _, t) -> 
-          interp (tm_substTm ta 0 0 t)
+      begin if not (tmIsVal ta)
+        then fail @@ pp_to_string "**Interpreter** " "Application expected a fully evaluated argument but found %a." pp_term ta
+        else begin match tf with
+        | TmAbs(_,bi,_, _, t) -> interp (tm_substTm ta 0 0 t) 
         | TmTyAbs(i, bi, tm) ->
           (* The case of inferred application. *)
           interp (TmApp(i, tm, ta))
-        | _ -> fail @@ "**Interpreter** Application expected a Prim or Lambda value but didn't find one."
+        | _ -> fail @@ pp_to_string "**Interpreter** " "Application expected a Prim or Lambda value but found %a." pp_term tf
+        end
       end
   
   | TmAbs(i, bi, (si, ty), tyo, tm) -> 
     isInPartial >>= fun goUnder ->
     if goUnder then begin
-      interp_info2 i "--- Interpreter: Going under a lambda%s." "";
+      interp_debug i "%s" "--- Interpreter: Going under a lambda.";
       mapMSi interp si >>= fun si ->
       mapMTy interp ty >>= fun ty ->
       (match tyo with
@@ -205,7 +225,7 @@ let rec interp t = withFailTerm t @@ match t with
         | Some t -> mapMTy interp t >>= fun x -> return (Some x)
       ) >>= fun tyo ->
       withAddedPartialCtx bi.b_name ty (interp tm) >>= fun tm ->
-      interp_info2 i "--- Interpreter: Exiting a lambda%s." "";
+      interp_debug i "%s" "--- Interpreter: Exiting a lambda.";
       return @@ TmAbs(i, bi, (si, ty), tyo, tm)
       end
     else return t
@@ -217,8 +237,8 @@ let rec interp t = withFailTerm t @@ match t with
   (* Bindings *)
   | TmLet(i, b, _, t, tBody) ->
       interp t >>= fun t -> 
-      interp_info2 Support.FileInfo.dummyinfo (* i *) "--- Interpreting let: Replacing %s with %a." b.b_name Print.pp_term t;
-      interp_info2 Support.FileInfo.dummyinfo (* i *) "--- Finishing let.  New term is: %a." Print.pp_term (tm_substTm t 0 0 tBody);
+      interp_debug i "--- Interpreting let: Replacing %s with %a." b.b_name Print.pp_term t;
+      interp_debug i "--- Finishing let.  New term is: %a." Print.pp_term (tm_substTm t 0 0 tBody);
       interp (tm_substTm t 0 0 tBody)
   
   | TmLetRec(i, b, ty, t, tBody) ->
@@ -235,29 +255,32 @@ let rec interp t = withFailTerm t @@ match t with
   | TmTyApp(i, t, ty) ->
       interp t >>= fun t ->
       withFailTerm (TmTyApp(i, t, ty))
-      begin match t with
-        | TmTyAbs(i', bi, tm)       -> interp (tm_substTy ty 0 0 tm) (* TODO: should this be typedef_subst??? *)
-        | _ -> fail @@ "**Interpreter** Type Application expected a Prim or TyLambda but didn't find one."
+      begin if false (*not (tyIsVal ty)*)
+        then fail @@ pp_to_string "**Interpreter** " "Type Application expected a fully evaluated type but found %a." pp_type ty
+        else begin match t with
+        | TmTyAbs(i', bi, tm)       -> interp (tm_substTy ty 0 0 tm)
+        | _ -> fail @@ pp_to_string "**Interpreter** " "Type Application expected a Prim or TyLambda found %a." pp_term t
+        end
       end
 
   (* Type definitions *)
   | TmTypedef(i,b,ty,tm) -> 
-    interp_info2 Support.FileInfo.dummyinfo (* i *) "--- Interpreting typedef: New term is %a." Print.pp_term t;
-    interp (tm_substTy ty 0 0 tm)
+    interp_debug i "--- Interpreting typedef: New term is %a." Print.pp_term t;
+    interp(tm_substTy (ty_shiftTy 0 (-1) ty) 0 0 tm)
   
   | TmIfThenElse(i, test, tterm, eterm) ->
       interp test >>= fun b -> 
       withFailTerm (TmIfThenElse(i, b, tterm, eterm))
       begin match b with
         | TmPrim(_,PrimTBool(b'))   -> interp (if b' then tterm else eterm)
-        | _                         -> fail "**Interpreter** If statement expected a Bool value but didn't find one"
+        | _                         -> fail @@ pp_to_string "**Interpreter** " "If statement expected a Bool but found %a." pp_term b
       end
 
 
 (* Equivalent to run *)
 (* val run_interp : term -> (string * primfun) list -> string *)
 let run_interp program prims =
-  match interp program ((None, []), None, prims) with
+  match interp program (None, None, prims) with
   | (_, Ok (TmPrim(_,PrimTString(s))))  -> s
   | (_, Ok _)       -> interp_error "%s" "Interpreter returned a non-string value"
   | (_, Error s)    -> interp_error "%s" s

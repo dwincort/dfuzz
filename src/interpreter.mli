@@ -27,11 +27,17 @@ module InterpMonad : sig
   
   val isInPartial : bool interpreter
   
-  val storeRedType : ty -> bool interpreter
+  val getTyCheckCtx : context interpreter
+  
+  val attemptRedZone : epsilon -> bool interpreter
   
   val getDB : term interpreter
   
-  val storeDB : term -> unit interpreter
+  val storeDB : term -> epsilon -> unit interpreter
+  
+  val getDelta : float interpreter
+  
+  val getEpsilon : epsilon interpreter
   
   val getPrimDefs : ((string * primfun) list) interpreter 
   

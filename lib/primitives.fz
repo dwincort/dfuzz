@@ -18,7 +18,7 @@ primitive op_land (op1 : bool) (op2 : bool) : bool { "_land" }
 // Polymorphic equality
 primitive op_eq   forall(A) (op1 :[] A) (op2 :[] A) : bool { "_eq" }
 // FIXME: Should this be a primitive?
-primitive op_neq  forall(A) (op1 :[] bool) (op2 :[] bool) : bool { "_neq" }
+primitive op_neq  forall(A) (op1 :[] A) (op2 :[] A) : bool { "_neq" }
 
 // Num primitives
 // Numerical comparison
@@ -39,10 +39,6 @@ primitive op_abs (n : num )                     : num { "_abs" }
 
 primitive const_mult (c : num) (n :[[c]] num)   : num { "_mul" }
 
-
-// Careful! This is only sound if d >= 1.
-primitive op_ldiv (d : num ) (n : num )     : num { "_ldiv" }
-
 // Integer primitives
 primitive op_iadd (op1 :[] int ) (op2 :[] int ) : int { "_iadd" }
 primitive op_isub (op1 :[] int ) (op2 :[] int ) : int { "_isub" }
@@ -50,15 +46,31 @@ primitive op_imul (op1 : int ) (op2 : int ) : int { "_imul" }
 primitive op_idiv (op1 : int ) (op2 : int ) : int { "_idiv" }
 
 // Clip type creation
-primitive clip (n :[] num) : clipped                     { "clip" }
+primitive clip (n :[] num) : clipped                    { "clip" }
+primitive fromClip (c :[] clipped) : num                { "fromClip" }
+
+// Clip operations
+primitive clip_mult (op1 :[] clipped) (op2 :[] clipped) : clipped { "_mul" }
+primitive clip_scale (op1 :[] clipped) (op2 :[] num) : num { "_mul" }
+primitive clip_plus (op1 :[] clipped) (op2 :[] clipped) : clipped { "_add" }
 
 // String primitives
-primitive num2string (n : num) : string { "num2string" }
-primitive string_concat (s1 : string) (s2 : string) : string { "string_cc" }
+primitive string_concat (s1 :[] string) (s2 :[] string) : string { "string_cc" }
+
+// Show functions
+showBool = fun (b : bool) : string { if b then {"true"} else {"false"} };
+primitive showNum (n : num) : string { "showNum" }
+
+////////////////////////////////////////////////////////////////////////
+// Testing utilities
+primitive assert (s : string) (b :[["No asserts in red zone"]] bool) : () { "assert" }
+primitive assertEq forall(A) (s : string) 
+  (a1 :[["No asserts in red zone"]] A)
+  (a2 :[["No asserts in red zone"]] A) : () { "assertEq" }
 
 ////////////////////////////////////////////////////////////////////////
 // Probability monad, return and bind
-primitive return   forall(A)   (x :[] A)                            : fuzzy A { "_return" }
+primitive return   forall(A)   (x : A)                            : fuzzy A { "_return" }
 // FIXME: sample is currently syntax instead of a primitive because of the lack of type inference
 //primitive p_sample forall(A,B) (x :[] fuzzy A) (f :[] A -> fuzzy B) : fuzzy B { "_bind"   }
 
@@ -67,23 +79,35 @@ primitive return   forall(A)   (x :[] A)                            : fuzzy A { 
 typedef delta = num;
 typedef epsilon = num;
 
-primitive loadDB forall(DB)(db : DB) : () { "loadDB" }
+primitive loadDB forall(DB) (db : DB) (budget : epsilon) : () { "loadDB" }
 
 primitive runFuzz
   forall(DB,A)
   (foo : DB -o fuzzy A)
   : (string + A) { "runRedZone" }
 
-primitive getDelta   (x : ()) : delta   { "getDelta"   }
-primitive getEpsilon (x : ()) : epsilon { "getEpsilon" }
+primitive runFuzz'
+  forall(DB,A)
+  (sens : num)
+  (foo : DB -o fuzzy A)
+  : (string + A) { "runRedZoneS" }
+
+primitive getDelta   (_ : ()) : delta   { "getDelta"   }
+primitive getEpsilon (_ : ()) : epsilon { "getEpsilon" }
 
 ////////////////////////////////////////////////////////////////////////
 // Differential Privacy mechanisms:
+primitive add_noise
+  (eps : num)
+  (n :[[eps]] num)
+  : fuzzy num { "addNoise" }
+
 primitive expMech
   forall(A,DB)
+  (eps : num)
   (foo : A -> DB -o fuzzy num) 
   (rs : A bag) 
-  (db :[] DB) 
+  (db :[[eps]] DB) 
   : fuzzy A { "expMech" }
 
 ////////////////////////////////////////////////////////////////////////

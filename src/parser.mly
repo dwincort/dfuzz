@@ -55,8 +55,7 @@ let rec qf_to_type qf ty = match qf with
   | (_, n) :: qfl   -> TyForall(nb_tyvar n, qf_to_type qfl ty)
 
 let rec list_to_type l ret_ty = match l with
-    []                        -> TyLollipop (TyPrim PrimUnit, si_infty, ret_ty) (* Not yet allowed constant function *)
-  | (ty, si, _n, _i) :: []    -> TyLollipop (ty, si, ret_ty)
+    []                        -> ret_ty
   | (ty, si, _n, _i) :: tyl   -> TyLollipop (ty, si, list_to_type tyl ret_ty)
 
 let from_args_to_type qf arg_list ret_ty =
@@ -208,7 +207,13 @@ PrimSpec :
       { $1 }
 
 Term :
-    ID SensAnn EQUAL Expr SEMI Term
+    Expr SEMI Term
+      {
+        fun ctx ->
+          let ctx' = extend_var "__seq" ctx in
+          TmLet($2, (nb_var "__seq"), si_infty, $1 ctx, $3 ctx')
+      }
+  | ID SensAnn EQUAL Expr SEMI Term
       {
         fun ctx ->
           let ctx' = extend_var $1.v ctx in
@@ -265,8 +270,8 @@ Argument :
    arguments ready to build a higher-order type, including quantifiers.
 */
 Arguments :
-    Argument
-      { $1 }
+  /* Nothing */
+    { fun ctx -> ([], ctx) }
   | Argument Arguments
       { fun ctx ->
           let (l,  ctx')  = $1 ctx in
@@ -312,23 +317,23 @@ RelTerm :
 
 AddTerm :
     AddTerm ADD MulTerm
-      { fun ctx -> mk_infix ctx $2 "op_add" ($1 ctx) ($3 ctx) }
+      { fun ctx -> mk_infix ctx $2 "op_add"  ($1 ctx) ($3 ctx) }
   | AddTerm DOT ADD MulTerm
       { fun ctx -> mk_infix ctx $2 "op_iadd" ($1 ctx) ($4 ctx) }
-  | AddTerm HAT MulTerm
-      { fun ctx -> mk_infix ctx $2 "string_concat" ($1 ctx) ($3 ctx) }
   | AddTerm SUB MulTerm
-      { fun ctx -> mk_infix ctx $2 "op_sub" ($1 ctx) ($3 ctx) }
+      { fun ctx -> mk_infix ctx $2 "op_sub"  ($1 ctx) ($3 ctx) }
   | AddTerm DOT SUB MulTerm
       { fun ctx -> mk_infix ctx $2 "op_isub" ($1 ctx) ($4 ctx) }
+  | AddTerm HAT MulTerm
+      { fun ctx -> mk_infix ctx $2 "string_concat" ($1 ctx) ($3 ctx) }
   | MulTerm
       { $1 }
 
 MulTerm :
     MulTerm MUL FTerm
-      { fun ctx -> mk_infix ctx $2 "op_mul" ($1 ctx) ($3 ctx) }
+      { fun ctx -> mk_infix ctx $2 "op_mul"  ($1 ctx) ($3 ctx) }
   | MulTerm DIV FTerm
-      { fun ctx -> mk_infix ctx $2 "op_div" ($1 ctx) ($3 ctx) }
+      { fun ctx -> mk_infix ctx $2 "op_div"  ($1 ctx) ($3 ctx) }
   | FTerm
       { $1 }
 

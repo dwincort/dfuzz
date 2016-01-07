@@ -205,7 +205,7 @@ let rec ty_substTy
     : ty =
   let fv kty v = 
     if kty = v.v_index then
-      ty_shiftTm 0 ktm (ty_shiftTy 0 (kty-x) t)
+      ty_shiftTm 0 ktm (ty_shiftTy 0 kty t)
     else
       TyVar (var_shift kty (-1) v)    in
   let fsi k si = si_substTy t ktm k si  in
@@ -253,6 +253,59 @@ let typedef_subst t x tm =
   let sisub k = si_shiftTy k (-1)  in
   tm_mapTy 0 tsub sisub tm
 *)
+
+
+(************************************************************************)
+(* Term and type valuation and equality *)
+
+let rec tmEq (t1 : term) (t2 : term) : bool = 
+  match t1, t2 with
+  | TmVar(_,v1), 
+    TmVar(_,v2) -> v1 = v2
+  | TmPrim(_,p1), 
+    TmPrim(_,p2) -> p1 = p2
+  | TmPrimFun(_,_,ty1,tml1), 
+    TmPrimFun(_,_,ty2,tml2) -> false
+  | TmBag(_, ty1, tml1), 
+    TmBag(_, ty2, tml2) -> false
+  | TmPair(_, t1a, t1b),
+    TmPair(_, t2a, t2b) -> tmEq t1a t2a && tmEq t1b t2b
+  | TmTensDest(_, _, _, t1a, t1b),
+    TmTensDest(_, _, _, t2a, t2b) -> tmEq t1a t2a && tmEq t1b t2b
+  | TmAmpersand(_, t1a, t1b),
+    TmAmpersand(_, t2a, t2b) -> tmEq t1a t2a && tmEq t1b t2b
+  | TmLeft(_, tm1, ty1),
+    TmLeft(_, tm2, ty2) -> tmEq tm1 tm2
+  | TmRight(_, tm1, ty1),
+    TmRight(_, tm2, ty2) -> tmEq tm1 tm2
+  | TmUnionCase(_, t1a, _, t1b, _, t1c),
+    TmUnionCase(_, t2a, _, t2b, _, t2c) -> tmEq t1a t2a && tmEq t1b t2b && tmEq t1c t2c
+  | TmFold(_, ty1, tm1),
+    TmFold(_, ty2, tm2) -> tmEq tm1 tm2
+  | _,_ -> false
+
+let rec tmIsVal (t : term) : bool = match t with
+  | TmPrim(_,_)     -> true
+  | TmBag(_,_,_)    -> true
+  | TmPair(_,t1,t2) -> tmIsVal t1 && tmIsVal t2
+  | TmAmpersand(_, t1, t2)  -> tmIsVal t1 && tmIsVal t2
+  | TmLeft(_,t,_)   -> tmIsVal t
+  | TmRight(_,t,_)  -> tmIsVal t
+  | TmAbs(_,_,_,_,_)    -> true
+  | TmFold(_,_,_)   -> true
+  | TmTyAbs(_,_,_)  -> true
+  | _               -> false
+
+let rec tyIsVal (t : ty) : bool = match t with
+  | TyVar _             -> false
+  | TyPrim  _           -> true
+  | TyPrim1(_, t)       -> tyIsVal t
+  | TyUnion(t1, t2)     -> tyIsVal t1 && tyIsVal t2
+  | TyTensor(t1, t2)    -> tyIsVal t1 && tyIsVal t2
+  | TyAmpersand(t1, t2) -> tyIsVal t1 && tyIsVal t2
+  | TyLollipop(t1,_,t2) -> tyIsVal t1 && tyIsVal t2
+  | TyMu(_,t)           -> true
+  | TyForall(_,_)       -> true
 
 
 

@@ -147,7 +147,7 @@ module TypeSens = struct
   let si_one   = SiConst 1.0
   let si_infty = SiInfty
   
-  let rec si_simpl (si : si) : si checker = match si with
+  let rec si_simpl' (si : si) : si checker = match si with
     | SiInfty   -> return @@ si
     | SiConst _ -> return @@ si
     | SiTerm(TmPrim(_, PrimTNum(f)))  -> return @@ SiConst f
@@ -155,8 +155,8 @@ module TypeSens = struct
     | SiTerm(TmPrim(_, PrimTBool(b))) -> return @@ if b then si_infty else si_zero
     | SiTerm(t) -> fail (tmInfo t) @@ UnevalSensTerm t
     | SiAdd (si1, si2)  ->
-        si_simpl si1 >>= fun si1 ->
-        si_simpl si2 >>= fun si2 ->
+        si_simpl' si1 >>= fun si1 ->
+        si_simpl' si2 >>= fun si2 ->
         begin match si1, si2 with
           | SiInfty, _  -> return @@ SiInfty
           | _, SiInfty  -> return @@ SiInfty
@@ -164,8 +164,8 @@ module TypeSens = struct
           | _   -> fail dummyinfo @@ Internal "Bad state when adding sensitivities"
         end
     | SiMult(si1, si2)  -> 
-        si_simpl si1 >>= fun si1 ->
-        si_simpl si2 >>= fun si2 ->
+        si_simpl' si1 >>= fun si1 ->
+        si_simpl' si2 >>= fun si2 ->
         begin match si1, si2 with
           | SiConst 0.0, _ -> return @@ si_zero
           | _, SiConst 0.0 -> return @@ si_zero
@@ -175,8 +175,8 @@ module TypeSens = struct
           | _   -> fail dummyinfo @@ Internal "Bad state when multiplying sensitivities"
         end
     | SiLub (si1, si2)  -> 
-        si_simpl si1 >>= fun si1 ->
-        si_simpl si2 >>= fun si2 ->
+        si_simpl' si1 >>= fun si1 ->
+        si_simpl' si2 >>= fun si2 ->
         begin match si1, si2 with
           | SiInfty, _            -> return @@ SiInfty
           | _, SiInfty            -> return @@ SiInfty
@@ -184,13 +184,37 @@ module TypeSens = struct
           | _   -> fail dummyinfo @@ Internal "Bad state when LUBing sensitivities"
         end
     
+  let si_simpl (si : si) : si checker = 
+    should_check_sens >>= fun b ->
+    if b then si_simpl' si else return si
+  
+  let rec si_simpl_ty' (ty : ty) : ty checker = 
+    match ty with
+    | TyVar v                 -> return ty
+    | TyPrim tp               -> return ty
+    | TyPrim1 (tp, ty)        -> si_simpl_ty' ty  >>= fun ty' -> return @@ TyPrim1 (tp, ty')
+    | TyUnion (ty1, ty2)      -> si_simpl_ty' ty1 >>= fun ty1 -> 
+                                 si_simpl_ty' ty2 >>= fun ty2 -> return @@ TyUnion    (ty1, ty2)
+    | TyTensor(ty1, ty2)      -> si_simpl_ty' ty1 >>= fun ty1 -> 
+                                 si_simpl_ty' ty2 >>= fun ty2 -> return @@ TyTensor   (ty1, ty2)
+    | TyAmpersand(ty1, ty2)   -> si_simpl_ty' ty1 >>= fun ty1 -> 
+                                 si_simpl_ty' ty2 >>= fun ty2 -> return @@ TyAmpersand(ty1, ty2)
+    | TyLollipop(ty1, s, ty2) -> si_simpl_ty' ty1 >>= fun ty1 -> 
+                                 si_simpl' s     >>= fun s   ->
+                                 si_simpl_ty' ty2 >>= fun ty2 -> return @@ TyLollipop(ty1, s, ty2)
+    | TyMu(b, ty)             -> si_simpl_ty' ty  >>= fun ty  -> return @@ TyMu(b, ty)
+    | TyForall(b, ty)         -> si_simpl_ty' ty  >>= fun ty  -> return @@ TyForall(b, ty)
+    
+  let si_simpl_ty (ty : ty) : ty checker = 
+    should_check_sens >>= fun b ->
+    if b then si_simpl_ty' ty else return ty
   
   (* Check that the first sensitivity is less than the second *)
   let check_sens_leq i (sil : si) (sir : si) : unit checker =
     should_check_sens >>= fun b ->
     if (not b) then return () else
-    si_simpl sil >>= fun sil ->
-    si_simpl sir >>= fun sir ->
+    si_simpl' sil >>= fun sil ->
+    si_simpl' sir >>= fun sir ->
     let res = match sil, sir with
       | _, SiInfty -> true
       | SiConst l, SiConst r -> (l <= r)
@@ -359,6 +383,16 @@ open TypeSens
 open TypeSub
 open TypeCheckMonad
 
+let reportSensitivity (level : int) (fi : info) (bi : binder_info) (si : si) : si checker =
+  should_check_sens >>= fun b ->
+  if b then
+    si_simpl si >>= fun si ->
+    Support.Error.message level Opt.TypeChecker fi
+      "### Inferred sensitivity for binder @[%a@] is @[%a@]" P.pp_binfo bi P.pp_si si;
+    return si
+  else return si
+
+
 let type_of_prim (t : term_prim) : ty = match t with
     PrimTUnit       -> TyPrim PrimUnit
   | PrimTNum _      -> TyPrim PrimNum
@@ -391,6 +425,7 @@ let rec type_of (t : term) : (ty * si list) checker  =
     return (type_of_prim pt, zeros len)
 
   | TmPrimFun(i, s, ty, tmlst) ->
+    si_simpl_ty ty >>= fun ty ->
     get_ctx_length >>= fun len ->
     return (ty, zeros len)
   
@@ -403,9 +438,10 @@ let rec type_of (t : term) : (ty * si list) checker  =
   (* λ (x :[si] tya_x) : tya_tm { tm } *)
   | TmAbs(i, b_x, (sia_x, tya_x), otya_tm, tm) ->
 
+    si_simpl sia_x                                    >>= fun sia_x ->
     with_extended_ctx i b_x.b_name tya_x (type_of tm) >>= fun (ty_tm, si_x, sis) ->
 
-    ty_debug (tmInfo t) "### Inferred sensitivity for binder @[%a@] is @[%a@]" P.pp_binfo b_x P.pp_si si_x;
+    reportSensitivity 4 (tmInfo t) b_x si_x >>= fun si_x ->
 
     check_type_ann i otya_tm ty_tm                  >>
     check_sens_leq i si_x sia_x                     >>
@@ -435,8 +471,8 @@ let rec type_of (t : term) : (ty * si list) checker  =
     ty_debug i "### Type of binder %a is %a" Print.pp_binfo x Print.pp_type ty_x;
 
     with_extended_ctx i x.b_name ty_x (type_of e) >>= fun (ty_e, si_x, sis_e) ->
-    ty_debug i "### Inferred sensitivity for binder @[%a@] is @[%a@]" P.pp_binfo x P.pp_si si_x;
-    check_sens_leq i si_x sia_x                 >>
+    reportSensitivity 4 (tmInfo t) x si_x         >>= fun si_x ->
+    check_sens_leq i si_x sia_x                   >>
     return (ty_e, add_sens sis_e (scale_sens si_x sis_x))
 
   (* function x <args ...> : tya_x { tm_x }; e *)
@@ -506,7 +542,7 @@ let rec type_of (t : term) : (ty * si list) checker  =
     ty_debug3 i "Calling typedef %a = %a on term %a" Print.pp_binfo n Print.pp_type tdef_ty Print.pp_term tm;
 
     (* We just substitute the type for the variable. *)
-    type_of (tm_substTy tdef_ty 0 0 tm)
+    type_of (tm_substTy (ty_shiftTy 0 (-1) tdef_ty) 0 0 tm)
 
   (* let (x,y) = e in e' *)
   | TmTensDest(i, x, y, e, t) ->
@@ -517,8 +553,8 @@ let rec type_of (t : term) : (ty * si list) checker  =
     (* Extend context with x and y *)
     with_extended_ctx_2 i x.b_name ty_x y.b_name ty_y (type_of t) >>= fun (ty_t, si_x, si_y, sis_t) ->
 
-    ty_debug (tmInfo t) "### Inferred sensitivity for binder @[%a@] is @[%a@]" P.pp_binfo x P.pp_si si_x;
-    ty_debug (tmInfo t) "### Inferred sensitivity for binder @[%a@] is @[%a@]" P.pp_binfo y P.pp_si si_y;
+    reportSensitivity 4 (tmInfo t) x si_x   >>= fun si_x ->
+    reportSensitivity 4 (tmInfo t) y si_y   >>= fun si_y ->
 
     return (ty_t, add_sens sis_t (scale_sens (si_lub si_x si_y) sis_e))
   
@@ -539,8 +575,9 @@ let rec type_of (t : term) : (ty * si list) checker  =
 
     with_extended_ctx i b_x.b_name ty1 (type_of e_l) >>= fun (tyl, si_x, sis_l) ->
     with_extended_ctx i b_y.b_name ty2 (type_of e_r) >>= fun (tyr, si_y, sis_r) ->
-    ty_debug (tmInfo t) "### Inferred sensitivity for binder @[%a@] is @[%a@]" P.pp_binfo b_x P.pp_si si_x;
-    ty_debug (tmInfo t) "### Inferred sensitivity for binder @[%a@] is @[%a@]" P.pp_binfo b_y P.pp_si si_y;
+    
+    reportSensitivity 4 (tmInfo t) b_x si_x          >>= fun si_x ->
+    reportSensitivity 4 (tmInfo t) b_y si_y          >>= fun si_y ->
     
     check_type_sub i tyr tyl >>
     check_type_sub i tyl tyr >>
@@ -584,8 +621,8 @@ let rec type_of (t : term) : (ty * si list) checker  =
 
   return (ty, sis)
 
-(* Equivalent to run *)
 let get_type sensCheck program =
+  ty_seq := 0;
   match type_of program (Ctx.empty_context, sensCheck) with
   | Ok (ty, _sis) -> ty
   | Error e -> typing_error_pp e.i pp_tyerr e.v

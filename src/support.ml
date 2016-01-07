@@ -13,6 +13,7 @@ module Options = struct
   | Parser
   | TypeChecker
   | Interpreter
+  | Assertion
 
   let default_components =
     [Lexer; Parser; TypeChecker; Interpreter]
@@ -43,7 +44,7 @@ module Options = struct
   }
 
   let debug_default = {
-    components   = [General;Lexer;Parser;TypeChecker;Interpreter];
+    components   = [General;Lexer;Parser;TypeChecker;Interpreter;Assertion];
     level        = 2;
     unicode      = true;
     pr_ann       = true;
@@ -71,11 +72,11 @@ module FileInfo = struct
                    Format.fprintf ppf "(%s:%02d.%02d)" short_file l c
     | UNKNOWN   -> Format.fprintf ppf ""
 
-  let file_ignored_list =
-    ["./lib/primitives.fz";
+  let file_ignored_list = []
+(*  ["./lib/primitives.fz";
      "examplese/fuzz/tutorial/library-lists.fz";
      "examplese/fuzz/tutorial/library-bags.fz";
-    ]
+    ] *)
 
   let file_ignored fi = match fi with
     | UNKNOWN   -> false
@@ -109,6 +110,7 @@ module Error = struct
     | Parser      -> "[Parser ]"
     | TypeChecker -> "[TyCheck]"
     | Interpreter -> "[Interp ]"
+    | Assertion   -> "[Assert ]"
 
   let level_to_string = function 
     | 0 -> "Error  "
@@ -130,7 +132,7 @@ module Error = struct
     | 5 -> "D2"
     | 6 -> "D3"
     | 7 -> "D4"
-    | _ -> ""
+    | _ -> "  "
 
   (* Default print function *)
   let message level component fi =

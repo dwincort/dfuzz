@@ -33,4 +33,8 @@ val ty_unfold : ty -> ty
 val tm_substTm : term -> int -> int -> term -> term
 val ty_substTm : term -> int -> int -> ty -> ty
 
+val tmEq : term -> term -> bool
+val tmIsVal : term -> bool
+val tyIsVal : ty -> bool
+
 val tmInfo : term -> info

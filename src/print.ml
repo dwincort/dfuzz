@@ -249,7 +249,7 @@ and pp_term ppf t =
     TmVar(_, v)             -> fprintf ppf "%a" pp_vinfo v
   (* Primitive terms *)
   | TmPrim(_, pt)           -> fprintf ppf "%s" (string_of_term_prim pt)
-  | TmPrimFun(_, n, _, _)   -> fprintf ppf "%s" ("primitive " ^ n)
+  | TmPrimFun(_, n, _, tmlst)   -> fprintf ppf "primitive function %s with args: [%a]" n (pp_list pp_term) tmlst
   
   (* Bags *)
   | TmBag(_, ty, tmlst)         -> fprintf ppf "Bag[%a]{%a}" pp_type ty (pp_list pp_term) tmlst
@@ -317,4 +317,8 @@ and print_special_app ppf tm1 tm2 =
     else
       regular_print tm1 tm2
   | _ -> regular_print tm1 tm2
+
+let pp_to_string s = 
+  fprintf str_formatter "%s" s;
+  kfprintf (fun _ -> Format.flush_str_formatter ()) str_formatter
 

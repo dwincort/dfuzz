@@ -112,6 +112,9 @@ let main () =
     type_check program;
 
   if comp_enabled Interpreter then
+    (* Set up Randomness *)
+    (* Random.init 1; *)
+    Random.self_init ();
     let outputStr = Interpreter.run_interp program Prim.prim_list in
     main_info dp "The result of the program: %s" outputStr;
   ()

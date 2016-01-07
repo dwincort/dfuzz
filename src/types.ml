@@ -40,6 +40,8 @@ type binder_info = {
 type ('a,'b) result = | Ok of 'a
                       | Error of 'b
 
+type epsilon = float
+
 (* Sensitivities *)
 type si =
   | SiInfty
@@ -100,7 +102,7 @@ and  term =
   (* Primitive terms *)
   | TmPrim      of info * term_prim
   (* TODO: Right now, the string in TmPrimFun is necessary, but in the future, I would like 
-     to make the type (string * ty * term list * primfun) and have the string be entirely for 
+     to make the type (info * string * ty * term list * primfun) and have the string be entirely for 
      debug purposes. This will involve passing the primfun list to the parser instead 
      of the interpreter and having the parser look up the strings directly. *)
   | TmPrimFun   of info * string * ty * term list
@@ -145,11 +147,11 @@ and  primfun = PrimFun of (ty * term list -> term interpreter)
 (* Interpreter monad *)
 (* TODO: The primfun list should be handled by the parser *)
 and  'a interpreter = 
-    ((term option * ty list)    (* The database and list of red zone computations performed so far *)
+    (((term * epsilon * epsilon list) option)    (* The database, its budget, and the list of red zone computation sensitivities performed so far *)
     * context option            (* The context option represents whether we are in partial 
                                    evaluation mode or not (Some context we are, None we aren't). *)
     * (string * primfun) list)  (* The primfun map is the initial set of primitive function implementations. *)
-   -> ((term option * ty list)  (* The database and list of red zone computations as output *)
+   -> ((term * epsilon * epsilon list) option   (* The database, its budget, and the list of red zone computation sensitivities as output *)
     * ('a, string) result)      (* the output is either an Ok value or an error with a string. *)
 
 (* Contexts for parsing and type checking *)
