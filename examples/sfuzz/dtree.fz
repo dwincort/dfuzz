@@ -1,44 +1,26 @@
 
 
-// Include the lists and bags library.
+// Include the bags and trees libraries (lists is included with these).
 #include "library-bags.fz"
+#include "library-trees.fz"
 
-/* Also include cpp for trees */
+/* Also include shortcuts for numtree nodes for convenience */
 
-#define tree(A)       (mu YY => (bool + (A, (YY,YY))))
-#define leafT(A)      (fold[tree(A)] (inl@[bool]@[(A, (tree(A), tree(A)))]{true}))
-#define leafF(A)      (fold[tree(A)] (inl@[bool]@[(A, (tree(A), tree(A)))]{false}))
-#define node(A,p,l,r) (fold[tree(A)] (inr@[bool]@[(A, (tree(A), tree(A)))]{(p,(l,r))}))
+typedef numtree = tree(num, bool);
 
-typedef boollist = list(bool);
-typedef db = boollist bag;
-typedef numtree = tree(num);
-
+function ntnode (p : num) (l : tree(num,bool)) (r : tree(num,bool)) : tree(num,bool) {
+  node@[num]@[bool] p l r
+}
+leafT = leaf@[num]@[bool] true;
+leafF = leaf@[num]@[bool] false;
 
 /*
 A database row is a list of bools.  The 0-indexed value is 
 the label, and the parameters are indexed 1 through k.
-We need a function to make all the possible trees.
-There will be k*(number of leaves) possible trees.
-This will be some sort of concatmap over a fold.
 */
+typedef boollist = list(bool);
+typedef db = boollist bag;
 
-// runTree takes a row of parameters and a tree and returns the 
-// value that the tree predicts for this row.
-// runTree : list(bool) -o tree -> bool
-function runTree
-  (row : boollist)
-  (t : numtree)
-  : bool
-  {
-    case unfold t of {
-      inl(b) => b
-    | inr(u) => let (p,ts) = u;
-                let (b,row') = index@[bool] false p row;
-                let (t1,t2) = ts;
-                runTree row' (if b then { t1 } else { t2 })
-    }
-  }
 
 
 // testTree takes a set of rows and a tree and returns the number of 
@@ -53,7 +35,8 @@ function testTree
     let (suc,fail) = bagsplit@[boollist]
         (fun (row : boollist) : bool {
             let (b,row') = index false 0.0 row;
-            runTree row' t == b }) 100.0 db;
+            choose = fun (p : num) : bool { let (res,_) = (index@[bool] false p row'); res };
+            runTree@[num]@[bool] choose t == b }) 100.0 db;
     return (bagsize@[boollist] suc)
   }
 
@@ -74,42 +57,15 @@ function chooseBestTree
                   sample score = testTree bagtime t' d;
                   if t == t' then { return (cutoffMod score) }
                              else { return score } } };
-    expMech@[numtree]@[db] test (addtobag@[numtree] t trees) db
+    expMech@[numtree]@[db] 1.0 test (addtobag@[numtree] t trees) db
   }
 
 
 // A function to return a list of nums [k .. 1]
 function listNums (k : num) : list(num) {
-  if (k <= 0.0) then { nil(num) }
-                else { cons(num, k, listNums (k - 1.0)) }
+  if (k <= 0.0) then { nil@[num] }
+                else { cons@[num] k (listNums (k - 1.0)) }
 }
-
-// makeTrees takes a list of unused parameters (initially [1..k])
-// and a tree and constructs a list of all possible trees that are 
-// have exactly one more node.
-function makeTrees
-  (params : list(num))
-  (t : numtree)
-  : numtree bag
-  {
-    case (unfold t) of {
-      inl(b) => list_foldl@[numtree bag]@[numtree bag] 
-                  bagjoin@[numtree] (emptybag@[numtree] ())
-        (list_map@[num]@[numtree bag] (fun (p : num) : (numtree bag) {
-            addtobag@[numtree] node(num, p, leafT(num), leafF(num))
-              (addtobag@[numtree] node(num, p, leafF(num), leafT(num))
-                (emptybag@[numtree] ())) } )
-            params)
-    | inr(u) => let (p,ts) = u;
-                let (t1,t2) = ts;
-                params' : = remove@[num] p params;
-                bagjoin@[numtree] 
-                  (bagmapins@[numtree]@[numtree] (fun (t : numtree) : numtree {
-                    node(num, p, t, t2) }) (makeTrees params' t1))
-                  (bagmapins@[numtree]@[numtree] (fun (t : numtree) : numtree {
-                    node(num, p, t1, t) }) (makeTrees params' t2))
-    }
-  }
 
 
 function generateDecisionTreeHelper
@@ -120,14 +76,15 @@ function generateDecisionTreeHelper
   (t : numtree)
   : numtree
   {
-    trees : = makeTrees (listNums k) t;
-    myfun : = fun (x : num) : num { evalFun (bagsize@[numtree] trees) delta epsilon x };
-    rz : = runFuzz@[db]@[numtree] (chooseBestTree t myfun trees 100.0);
+    bools = cons@[bool] true (cons@[bool] false nil@[bool]);
+    trees = listtobag@[numtree] (makeTrees@[num]@[bool] (listNums k) bools t);
+    myfun = fun (x : num) : num { evalFun (bagsize@[numtree] trees) delta epsilon x };
+    rz = runFuzz@[db]@[numtree] (chooseBestTree t myfun trees 100.0);
     case rz of {
       inl(unit) => t
     | inr(t') =>
-        d : = getDelta ();
-        e : = getEpsilon ();
+        d = getDelta;
+        e = getEpsilon;
         if (t == t') then { t' }
                      else { generateDecisionTreeHelper k evalFun d e t' }
     }
@@ -141,18 +98,30 @@ function generateDecisionTree
   (evalFun : num -> num -> num -> num -> num) //perhaps the last one should be -o?
         //  length trees -> delta -> epsilon -> base tree score -> modified tree score
   : numtree
-  { generateDecisionTreeHelper k (evalFun) 0.0 0.0 leafT(num) }
+  { generateDecisionTreeHelper k (evalFun) 0.0 0.0 leafT }
 
 
-
+function makeDB (k : num) : db {
+  row1 : = cons@[bool] true  (cons@[bool] true  (cons@[bool] false nil@[bool]));
+  row2 : = cons@[bool] true  (cons@[bool] true  (cons@[bool] true  nil@[bool]));
+  row3 : = cons@[bool] false (cons@[bool] false (cons@[bool] false nil@[bool]));
+  row4 : = cons@[bool] false (cons@[bool] false (cons@[bool] true  nil@[bool]));
+  addtobag@[boollist] row1
+    (addtobag@[boollist] row3
+      (addtobag@[boollist] row3
+        (addtobag@[boollist] row4
+          (emptybag@[boollist]))))
+}
 
 function myeval (len : num) (delta : num) (eps : num) (bs : num) : num {
   bs
-  }
-
-function main (_unit : ()) : string {
-  t : = generateDecisionTree 2.0 myeval;
-  "print tree"
 }
 
+function main (arg : ()) : string {
+  t : = generateDecisionTree 2.0 myeval;
+  printTree@[num]@[bool] showNum showBool t
+
+}
+
+loadDB@[db] (makeDB 2.0) 5.0;
 main ()

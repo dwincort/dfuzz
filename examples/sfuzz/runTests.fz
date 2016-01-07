@@ -1,0 +1,8 @@
+
+
+#include "test-lists.fz"
+#include "test-trees.fz"
+#include "test-simple.fz"
+#include "test-simple-red.fz"
+
+"Testing complete"

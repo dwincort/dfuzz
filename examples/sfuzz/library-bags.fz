@@ -18,7 +18,7 @@
   
   Creates an empty bag.
 */
-primitive emptybag forall(A) (x : ()) : A bag { "emptybag" }
+primitive emptybag forall(A) : A bag { "emptybag" }
 
 /*
   addtobag : A -o A bag -o A bag
@@ -41,6 +41,13 @@ primitive bagjoin forall(A) (b1 :[] A bag) (b2 :[] A bag) : A bag { "bagjoin" }
   Given a bag it returns the number of elements in it.
 */
 primitive bagsize forall(A) (b :[] A bag) : num { "bagsize" }
+
+/*
+  bagshow : string bag -o string
+  
+  Given a string bag, it shows the bag
+*/
+primitive bagshow (b :[] string bag) : string { "bagshow" }
 
 /*
   bagsplit : (A -> bool) -> num -> A bag -o ( A bag x A bag ) 
@@ -101,7 +108,7 @@ primitive bagmapins forall (A,B) (f : A -> B) (a : A bag) : B bag { "bagmapins" 
 */
 function listtobag forall(A) (lst :[] list(A)) : A bag {
   case (unfold lst) of {
-    inl(unit) => emptybag@[A] ()
+    inl(unit) => emptybag@[A]
   | inr(xxs)  => let (x,xs) = xxs;
                  addtobag@[A] x (listtobag@[A] xs)
   }
@@ -125,13 +132,13 @@ function bagfilter forall (A) (test: A -> bool) (timeout : num) (b:[] A bag) : A
 */
 function bagpartition forall (A, K) (klist: list(K)) (timeout : num) (db :[] (K, A) bag) : list((K,A) bag) {
     case unfold klist of {
-      inl(x) => nil((K,A) bag)
+      inl(x) => nil@[(K,A) bag]
     | inr(x) => let (k,ks) = x;
                 let (db1, db2) = bagsplit@[(K,A)] 
                       (fun (y :[] (K,A)) : bool {
                         let (y1,y2) = y;
                         y1 == k}) timeout db;
-                cons((K,A) bag, db1, bagpartition@[A]@[K] ks timeout db2)
+                cons@[(K,A) bag] db1 (bagpartition@[A]@[K] ks timeout db2)
     }
 }
 
