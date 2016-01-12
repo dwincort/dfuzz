@@ -6,7 +6,8 @@
 l123 = cons@[num] 1.0 (cons@[num] 2.0 (cons@[num] 3.0 nil@[num]));
 l456 = cons@[num] 4.0 (cons@[num] 5.0 (cons@[num] 6.0 nil@[num]));
 l123s = cons@[string] "1." (cons@[string] "2." (cons@[string] "3." nil@[string]));
-l123456 = cons@[num] 1.0 (cons@[num] 2.0 (cons@[num] 3.0 (cons@[num] 4.0 (cons@[num] 5.0 (cons@[num] 6.0 nil@[num])))));
+
+l123456 = listFromFile@[num] "examples/data/list1.dat";
 
 assertEq@[list(num)]    "Lists #1 " (list_map@[num]@[num] (fun (x : num) : num { x + 3.0 }) l123) l456;
 assertEq@[list(string)] "Lists #2 " (list_map@[num]@[string] showNum l123) l123s;

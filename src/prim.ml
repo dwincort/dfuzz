@@ -34,27 +34,36 @@ let di = dummyinfo
 let message n = Support.Error.message n Support.Options.Interpreter di
 let assertionMsg i = Support.Error.message (-1) Support.Options.Assertion i
 
+
+(* The expectation functions take a term and return an ocaml value *)
 let exBool name tb = match tb with 
   | TmPrim (_i, PrimTBool b) -> return b
-  | _ -> fail ("** Primitive ** "^name^" expected a bool but found something else.")
+  | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a bool but found %a" name pp_term tb
 let exNum name tn = match tn with 
   | TmPrim (_i, PrimTNum n) -> return n
-  | _ -> fail ("** Primitive ** "^name^" expected a num but found something else.")
+  | TmPrim (_i, PrimTClipped n) -> return n
+  | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a num but found %a" name pp_term tn
 let exInt name tn = match tn with 
   | TmPrim (_i, PrimTInt n) -> return n
-  | _ -> fail ("** Primitive ** "^name^" expected an int but found something else.")
+  | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected an int but found %a" name pp_term tn
 let exString name ts = match ts with 
   | TmPrim (_i, PrimTString s) -> return s
-  | _ -> (message 3 "--- This was found: %a" pp_term ts;
-            fail ("** Primitive ** "^name^" expected a string but found something else."))
-let exBag name ts = match ts with 
+  | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a string but found %a" name pp_term ts
+let exBag name tb = match tb with 
   | TmBag(_i, _ty, tlst) -> return tlst
-  | _ -> fail ("** Primitive ** "^name^" expected a bag but found something else.")
+  | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a bag but found %a" name pp_term tb
+let exPair name ex1 ex2 tp = match tp with 
+  | TmPair(_i, t1, t2) -> ex1 name t1 >>= fun v1 ->
+                          ex2 name t2 >>= fun v2 ->
+                          return (v1, v2)
+  | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a pair but found %a" name pp_term tp
 let exFun _name t = return t (* Theoretically, we could check that it's actually a function, but we don't need to *)
 let exAny _name t = return t
 
+(* The make functions turn an ocaml value into a term *)
 let mkBool i b   = TmPrim (i, PrimTBool b)
 let mkNum i n    = TmPrim (i, PrimTNum n)
+let mkClipped i c = TmPrim (i, PrimTClipped c)
 let mkInt i n    = TmPrim (i, PrimTInt n)
 let mkString i s = TmPrim (i, PrimTString s)
 let mkBag i (ty, l) = TmBag (i, ty, l)
@@ -62,6 +71,7 @@ let mkPair mk1 mk2 i (t1, t2) = TmPair (i, mk1 i t1, mk2 i t2)
 let mkAny _i t   = t
 let mkUnit i _   = TmPrim (i, PrimTUnit)
 
+(* The fun_of_*_arg* functions are short hands for making the primitives easily *)
 let fun_of_no_args_with_type_i
   (name : string)                           (* The name of the function - for debug purposes *)
   (mk : info -> 'a -> term)                 (* A maker for the result *)
@@ -191,11 +201,25 @@ let fun_of_4args_i
   : primfun = fun_of_4args_with_type_i name efst esnd ethd efth mk (fun _ty a b c d -> op a b c d)
 
 
+
+(*****************************************************************************)
+(* Here we have modifying functions *)
+
+(* Makes sure that the given function only evaluates when we are in full 
+   evaluation mode (as opposed to partial. *)
+let onlyInFullEval (name : string) (f : 'a interpreter) : 'a interpreter = 
+  isInPartial >>= fun b ->
+  if b then fail (name^" not to be evaluated during partial evaluation") else f
+
+
+(*****************************************************************************)
+(* Here we have specific helper functions for specific primitives. *)
+
 let assertFun
   (s : string)
   (b : bool)
   : unit = 
-    assertionMsg di "--- %s: %s" s (if b then "PASS" else "FAIL"); ()
+    assertionMsg di "%s: %s" s (if b then "PASS" else "FAIL"); ()
 
 let assertEqFun
   (s : string)
@@ -203,15 +227,16 @@ let assertEqFun
   (t2 : term)
   : unit = 
     let res = if Syntax.tmEq t1 t2 
-              then pp_to_string "PASS " "with value %a" pp_term t1
+              then "PASS"
               else pp_to_string "FAIL " "(%a != %a)" pp_term t1 pp_term t2
-    in assertionMsg di "--- %s: %s" s res; ()
+    in assertionMsg di "%s: %s" s res; ()
 
 let runRedZone
   (ty : ty)
   (sens : float)
   (f : term)
   : term interpreter =
+    onlyInFullEval "runRedZone" (return ()) >>
     let genFailResult s = begin 
         match ty with
             | TyUnion(_, aty) -> return (TmLeft(di, TmPrim(di, PrimTString s), aty))
@@ -221,8 +246,7 @@ let runRedZone
     message 3 "--- RunRedZone: Before Partial evaluation: %a" pp_term f;
     inPartial (Interpreter.interp f) >>= fun pf ->
     message 3 "--- RunRedZone: Partial evaluation results in: %a" pp_term pf;
-    getTyCheckCtx >>= fun ctx -> (* Is this context ever going to have anything in it? Something about nested calls to runRedZone??? *)
-    match Tycheck.type_of pf (ctx, true) with 
+    match Tycheck.type_of pf (Ctx.empty_context, true) with 
         | Error e -> genFailResult @@ pp_to_string "" "%a" Tycheck.pp_tyerr e.v
         | Ok (tyf, _) -> begin
       message 3 "--- RunRedZone: Type checking completed and found type: %a" pp_type tyf;
@@ -242,10 +266,23 @@ let runRedZone
                   else genFailResult "Database is all used up"
     end
 
+(* Here are ones specifically for bag stuff. *)
+let bagshowFun
+  (b : term list)
+  : string interpreter =
+    mapM (exString "bagshow") b >>= fun strList ->
+    return @@ String.concat "," strList
 
-let onlyInFullEval (name : string) (f : 'a interpreter) : 'a interpreter = 
-  isInPartial >>= fun b ->
-  if b then fail (name^" not to be evaluated during partial evaluation") else f
+let rec bagfoldlFun
+  (f : term)
+  (timeout : float)
+  (a : term)
+  (bbag : term list)
+  : term interpreter = 
+    match bbag with
+    | [] -> return a
+    | b::bs -> Interpreter.interp (TmApp(di, f, TmPair(di, a, b))) >>= fun x ->
+               bagfoldlFun f timeout x bs
 
 let bagmapFun 
   (ty : ty)
@@ -254,12 +291,6 @@ let bagmapFun
   : (ty * term list) interpreter = 
     mapM Interpreter.interp (List.map (fun tm -> TmApp(di, f, tm)) b) >>= fun lst ->
     return (ty, lst)
-
-let bagshowFun
-  (b : term list)
-  : string interpreter =
-    mapM (exString "bagshow") b >>= fun strList ->
-    return @@ String.concat "," strList
 
 let bagsplitFun
   (oty : ty)
@@ -275,13 +306,13 @@ let bagsplitFun
     return ((bty, List.map fst lst1), (bty, List.map fst lst2))
 
 
+(* Here are ones specifically for differential private noise. *)
 let addNoiseFun
   (eps : float)
   (n : float)
   : float = n +. (Math.lap eps)
-    
 
-(* TODO: add epsilon parameter *)
+
 (* expMechFun : num[e] -> (R -> DB -o fuzzy num) -> R bag -> DB -o[e] fuzzy R *)
 let expMechFun
   (eps : float)
@@ -290,7 +321,7 @@ let expMechFun
   (db : term)
   : term interpreter = 
     mapM (fun r -> Interpreter.interp (TmApp(di, TmApp(di, quality, r), db)) 
-            >>= exNum "expMechFun"
+            >>= exNum "expMech"
             >>= fun q -> return (r, q +. Math.lap (2.0 /. eps))) rbag >>= fun problist ->
 (*    Support.Error.message 3 Support.Options.Interpreter Support.FileInfo.dummyinfo 
       "--- expMech: Probabilities are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) problist));*)
@@ -298,6 +329,91 @@ let expMechFun
             (fun best r -> if snd r > snd best then r else best)
             (mkUnit di (), neg_infinity) problist in
     return res
+
+
+(* expMechOnePassFun : num[e] -> (DB -o fuzzy ((R,num) bag)) -> DB -o[e] fuzzy R *)
+let expMechOnePassFun
+  (eps : float)
+  (quality : term)
+  (db : term)
+  : term interpreter = 
+    Interpreter.interp (TmApp(di, quality, db)) >>= exBag "expMechOnePass" >>= fun resbag ->
+    mapM (exPair "expMechOnePass" exAny exNum) resbag >>= fun rnumlist ->
+    let problist = List.map (fun (r,q) -> (r, q +. Math.lap (2.0 /. eps))) rnumlist in
+(*    Support.Error.message 3 Support.Options.Interpreter Support.FileInfo.dummyinfo 
+      "--- expMech: Probabilities are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) problist));*)
+    let (res, _) = List.fold_left 
+            (fun best r -> if snd r > snd best then r else best)
+            (mkUnit di (), neg_infinity) problist in
+    return res
+
+
+(*****************************************************************************)
+(* Here are some helpers for file and string parsing. *)
+let fileLines (filename : string) = 
+  let lines = ref [] in
+  let chan = open_in filename in
+  try
+    while true; do
+      lines := input_line chan :: !lines
+    done; !lines
+  with End_of_file ->
+    close_in chan;
+    List.rev !lines
+
+
+let typeToMaker (ty : ty) : (string -> term) interpreter = match ty with
+  | TyPrim PrimNum  -> return (fun s -> mkNum di (float_of_string s))
+  | TyPrim PrimInt  -> return (fun s -> mkInt di (int_of_string s))
+  | TyPrim PrimUnit -> return (fun s -> TmPrim (di, PrimTUnit))
+  | TyPrim PrimBool -> return (fun s -> mkBool di (bool_of_string s))
+  | TyPrim PrimString   -> return (mkString di)
+  | TyPrim PrimClipped  -> return (fun s -> mkClipped di (let x = float_of_string s in 
+                                                          if x > 1. then 1. else (if x < 0. then 0. else x)))
+  | _ -> fail @@ pp_to_string "" "**Primitive** unsupported read type: %a." pp_type ty
+
+(* Here are the *fromFile primitives. *)
+let bagFromFileFun
+  (oty : ty)
+  (fn : string)
+  : (ty * term list) interpreter = 
+    let lines = fileLines fn in
+    (match oty with
+      | TyPrim1 (Prim1Bag, subty)   -> return subty
+      | _   -> fail @@ pp_to_string "" "**Primitive** bagFromFile found a weird type %a." pp_type oty
+    ) >>= fun subty ->
+    typeToMaker subty >>= fun lineFun ->
+    return (oty, List.map lineFun lines)
+
+let listFromFileFun
+  (oty : ty)
+  (fn : string)
+  : term interpreter = 
+    let lines = fileLines fn in
+    (match oty with
+      | TyMu (_, TyUnion (TyPrim PrimUnit, TyTensor (subty, TyVar _))) -> return subty
+      | _   -> fail @@ pp_to_string "" "**Primitive** listFromFile found a weird type %a." pp_type oty
+    ) >>= fun subty ->
+    typeToMaker subty >>= fun lineFun ->
+    return (List.fold_right (fun v fzlst -> TmFold (di, oty, TmRight (di, TmPair (di, v, fzlst), TyPrim PrimUnit)))
+                            (List.map lineFun lines) 
+                            (TmFold (di, oty, TmLeft (di, TmPrim (di, PrimTUnit), subty))))
+
+let listbagFromFileFun
+  (oty : ty)
+  (fn : string)
+  : (ty * term list) interpreter = 
+    let lines = fileLines fn in
+    (match oty with
+      | TyPrim1 (Prim1Bag, TyMu (_, TyUnion (TyPrim PrimUnit, TyTensor (subty, TyVar _)))) -> return subty
+      | _   -> fail @@ pp_to_string "" "**Primitive** baglistFromFile found a weird type %a." pp_type oty
+    ) >>= fun subty ->
+    typeToMaker subty >>= fun wordFun ->
+    let lineFun line = List.fold_right (fun v fzlst -> TmFold (di, oty, TmRight (di, TmPair (di, v, fzlst), TyPrim PrimUnit)))
+                            (List.map wordFun (Str.split (Str.regexp "[ \t]+") line))
+                            (TmFold (di, oty, TmLeft (di, TmPrim (di, PrimTUnit), subty)))
+    in return (oty, List.map lineFun lines)
+
 
 
 
@@ -345,7 +461,7 @@ let prim_list : (string * primfun) list = [
 ("_idiv", fun_of_2args "_idiv" exInt exInt mkInt ( / ));
 
 (* clip creation *)
-("clip", fun_of_1arg "clip" exNum mkNum (fun x -> if x > 1.0 then 1.0 else if x < 0.0 then 0.0 else x));
+("clip", fun_of_1arg "clip" exNum mkClipped (fun x -> if x > 1.0 then 1.0 else if x < 0.0 then 0.0 else x));
 ("fromClip", fun_of_1arg "fromClip" exNum mkNum (fun x -> x));
 
 (* String operations *)
@@ -353,6 +469,7 @@ let prim_list : (string * primfun) list = [
 
 (* Show functions *)
 ("showNum", fun_of_1arg "showNum" exNum mkString ( string_of_float ));
+("showInt", fun_of_1arg "showInt" exInt mkString ( string_of_int ));
 
 (* Testing Utilities *)
 ("assert",   fun_of_2args "assert"   exString exBool mkUnit assertFun);
@@ -379,6 +496,8 @@ let prim_list : (string * primfun) list = [
 ("bagsize", fun_of_1arg "bagsize" exBag mkNum (fun l -> float_of_int (List.length l)));
 ("bagshow", fun_of_1arg_i "bagshow" exBag mkString bagshowFun);
 
+("bagfoldl", fun_of_4args_i "bagfoldl" exAny exNum exAny exBag mkAny bagfoldlFun);
+
 ("bagmapins", fun_of_2args_with_type_i "bagmapins" exFun exBag mkBag bagmapFun);
 ("bagmap", fun_of_3args_with_type_i "bagmap" exFun exNum exBag mkBag 
   (fun ty f _timeout b -> bagmapFun ty f b));
@@ -395,6 +514,12 @@ let prim_list : (string * primfun) list = [
 ("addNoise", fun_of_2args "addNoise" exNum exNum mkNum addNoiseFun);
 
 ("expMech", fun_of_4args_i "expMech" exNum exFun exBag exAny mkAny expMechFun);
+("expMechOnePass", fun_of_3args_i "expMechOnePass" exNum exFun exAny mkAny expMechOnePassFun);
+
+(* Load data from external file *)
+("bagFromFile",  fun_of_1arg_with_type_i "bagFromFile"  exString mkBag bagFromFileFun);
+("listFromFile", fun_of_1arg_with_type_i "listFromFile" exString mkAny listFromFileFun);
+("listbagFromFile", fun_of_1arg_with_type_i "listbagFromFile" exString mkBag listbagFromFileFun);
 
 ]
 

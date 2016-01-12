@@ -83,8 +83,8 @@ function generateDecisionTreeHelper
     case rz of {
       inl(unit) => t
     | inr(t') =>
-        d = getDelta;
-        e = getEpsilon;
+        d = getDelta ();
+        e = getEpsilon ();
         if (t == t') then { t' }
                      else { generateDecisionTreeHelper k evalFun d e t' }
     }

@@ -399,6 +399,7 @@ let type_of_prim (t : term_prim) : ty = match t with
   | PrimTInt _      -> TyPrim PrimInt
   | PrimTBool _     -> TyPrim PrimBool
   | PrimTString  _  -> TyPrim PrimString
+  | PrimTClipped _  -> TyPrim PrimClipped
 
 
 (* Given a term t and a context ctx for that term, check whether t is

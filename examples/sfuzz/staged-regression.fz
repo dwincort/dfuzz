@@ -1,0 +1,120 @@
+
+
+// Include the bags libraries (lists is included with this).
+#include "library-bags.fz"
+
+#define matrix(A)   (list(list(A)))
+#define vector(A)   (list(A))
+
+/*
+A database row is a list of clipped nums.  The 0-indexed value is 
+the label, and the parameters are indexed 1 through k.
+*/
+
+
+
+typedef nlist = list(num);
+typedef clist = list(clipped);
+typedef db = (clipped, clist) bag;
+
+function innerProd
+  (v1 :[] clist)
+  (v2 :[] clist)
+  : clipped {
+    list_foldl@[clipped]@[clipped] clip_plus (clip 0.0)
+      (zipWith@[clipped]@[clipped]@[clipped] clip_mult v1 v2)
+}
+
+function pairWithCount
+  forall(A)
+  (n : int)
+  (lst : list(A))
+  : list((int,A)) {
+  case unfold lst of {
+    inl(_)   => nil@[(int,A)]
+  | inr(xxs) => let (x,xs) = xxs;
+                cons@[(int,A)] (n,x) (pairWithCount@[A] (n .+ 1) xs)
+  }
+}
+
+function rowop
+  (beta : clist)
+  (accum :[] nlist)
+  (row :[] (clipped, clist))
+  : nlist {
+    let (y,rlst) = row;
+    mew = (innerProd beta rlst);
+    c = list_map@[clipped]@[num] (fun (x : clipped) : num { (fromClip y - fromClip mew) * (fromClip x) }) rlst;
+    zipWith@[num]@[num]@[num] op_add accum c
+}
+  
+function stagewiseRed
+  (eps : num)
+  (smallconstant : clipped)
+  (beta : clist)
+  (db :[] db)
+  : fuzzy clist {
+    // We need a list of zeros to begin accumulating the values we need
+    zeros = list_map@[clipped]@[clipped] (fun (x : clipped) : clipped { clip 0.0 }) beta;
+    // This function f will be what we pass to the exponential mechanism
+    f = fun (db : db) : fuzzy (((int,num),num) bag) {
+      // The main operation is a fold over the database using the above "rowop" function
+      res = bagfoldl@[nlist]@[(clipped, clist)]
+            (uncurry@[nlist]@[(clipped, clist)]@[nlist] (rowop beta))
+            100.0
+            zeros
+            db;
+      // The result of the fold is the current correlation vector c.  We pair each value with its index.
+      res = pairWithCount@[num] 0 res;
+      // We massage the data into a proper form for the expMechOnePass function.
+      res = list_map@[(int,num)]@[((int,num),num)] (fun (xy : (int,num)) : ((int,num),num) { let (i,n) = xy; ((i,n),n) }) res;
+      // Convert the result to a bag and return it in the probability monad.
+      return (listtobag@[((int,num),num)] res) };
+    // Run the exponential mechanism.
+    sample jcj = expMechOnePass@[(int,num)]@[db] eps f db;
+    // The result is both the index j and the value of c at j.
+    let (j,cj) = jcj;
+    // Because c is a clipped list, finding the sign of c is irrelevant, so we add epsilon to beta at j.
+    return (performAt@[clipped] j (clip_plus smallconstant) beta)
+}
+
+function stagewiseGreen
+  (eps : num)
+  (smallconstant : clipped)
+  (beta : clist)
+  : string {
+    assert (showList@[clipped] showClipped beta) true;
+    rz = runFuzz@[db]@[clist] (stagewiseRed eps smallconstant beta);
+    case rz of {
+      inl(s) => s
+    | inr(beta') =>
+        if (beta == beta') then { showList@[clipped] showClipped beta }
+                           else { stagewiseGreen eps smallconstant beta' }
+    }
+}
+
+
+
+
+db = (db = listbagFromFile@[num] "examples/data/baglist1.dat";
+      db = bagmapins@[nlist]@[clist]
+            (fun (l : nlist) : clist {
+              list_map@[num]@[clipped] (fun (x : num) : clipped { clip (x / 10.0) }) l}) db;
+      bagmapins@[clist]@[(clipped,clist)] (uncons (clip 0.0)) db);
+
+
+l123 = cons@[num] 1.0 (cons@[num] 2.0 (cons@[num] 3.0 nil@[num]));
+l456 = cons@[num] 4.0 (cons@[num] 5.0 (cons@[num] 6.0 nil@[num]));
+l123c = list_map@[num]@[clipped] (fun (x : num) {clip (x / 10.0)}) l123;
+l456c = list_map@[num]@[clipped] (fun (x : num) {clip (x / 10.0)}) l456;
+l000c = list_map@[num]@[clipped] (fun (x : num) {clip (0.0)}) l123;
+
+// showList@[(int,clipped)] (showPair@[int]@[clipped] showInt showClipped) (pairWithCount@[clipped] 1 l456c)
+// bagshow (bagmapins@[(num,nlist)]@[string] (showPair@[num]@[nlist] showNum (showList@[num] showNum)) db)
+
+// WHITE ZONE
+loadDB@[db] db 50.0;
+stagewiseGreen 1.0 (clip 0.1) l000c
+
+
+

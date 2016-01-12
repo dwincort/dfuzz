@@ -77,31 +77,19 @@ module InterpMonad = struct
   let fail (message : string) : 'a interpreter = fun (db, _, _) -> (db, Error message)
   
   let withFailTerm (tm : term) (m : term interpreter) : term interpreter = 
-    fun ((_, pe, _) as inp) -> match pe, m inp with
-      | _, ((_, Ok _) as res) -> res
-      | None, ((_, Error _) as res) -> res
-      | Some _, (db, Error s) -> begin
-        interp_messageNoFi 4 "--- Skipping failure \"%s\"; reverting to state %a." s Print.pp_term tm;
-        (db, Ok tm)
-        end
+    fun ((_, pe, _) as inp) -> match m inp with
+      | (_, Ok _) as res -> res
+      | (db, Error s) as res -> if pe
+        then begin
+          interp_messageNoFi 4 "--- Skipping failure \"%s\"; reverting to state %a." s Print.pp_term tm;
+          (db, Ok tm)
+        end else res
   
   let inPartial (m : 'a interpreter) : 'a interpreter = 
-    fun (db, _, plst) -> m (db, Some empty_context, plst)
+    fun (db, _, plst) -> m (db, true, plst)
   
   let isInPartial : bool interpreter = 
-    fun (db, pe, _) -> match pe with
-      | None   -> (db, Ok false)
-      | Some _ -> (db, Ok true)
-  
-  let withAddedPartialCtx (id : string) (ty : ty) (m : 'a interpreter) : 'a interpreter = 
-    fun (db, pe, plst) -> match pe with
-      | None    -> m (db, pe, plst)
-      | Some c  -> m (db, Some (extend_ctx_with_var' id ty c), plst)
-  
-  let getTyCheckCtx : context interpreter =
-    fun (db, pe, _) -> match pe with
-      | None    -> (db, Ok empty_context)
-      | Some c  -> (db, Ok c)
+    fun (db, pe, _) -> (db, Ok pe)
   
   let attemptRedZone (sens : epsilon) : bool interpreter =
     fun (db, _, _) -> match db with
@@ -117,10 +105,10 @@ module InterpMonad = struct
       | Some (db,_,_) -> (o, Ok db)
   
   let storeDB (db : term) (budget : epsilon) : unit interpreter = 
-    fun (db_init, pe, _) -> match pe with
-      | None -> (Some (db, budget, []), Ok ())
-      | Some _ -> (interp_messageNoFi 1 "Trying to storeDB in red zone.  Quietly skipping ...";
-                  (db_init, Ok ()))
+    fun (db_init, pe, _) -> if pe
+      then begin interp_messageNoFi 1 "Trying to storeDB in red zone.  Quietly skipping ...";
+                 (db_init, Ok ())
+      end else (Some (db, budget, []), Ok ())
   
   let getDelta : float interpreter = 
     return 0.0
@@ -224,15 +212,22 @@ let rec interp t = withFailTerm t @@ match t with
         | None -> return None
         | Some t -> mapMTy interp t >>= fun x -> return (Some x)
       ) >>= fun tyo ->
-      withAddedPartialCtx bi.b_name ty (interp tm) >>= fun tm ->
+      interp tm >>= fun tm ->
       interp_debug i "%s" "--- Interpreter: Exiting a lambda.";
       return @@ TmAbs(i, bi, (si, ty), tyo, tm)
       end
     else return t
 
   (* Recursive data types *)
-  | TmFold(i, _, t) -> interp t
-  | TmUnfold(i, t)  -> interp t
+  (* Do not interpret folding and unfolding during partial application *)
+  | TmFold(i, ty, t) ->
+    interp t >>= fun t -> return @@ TmFold(i, ty, t)
+  | TmUnfold(i, t)   ->
+    interp t >>= fun t -> 
+    begin match t with 
+    | TmFold(_,_,t) -> return t
+    | _ -> fail @@ pp_to_string "**Interpreter** " "Tried to unfold a non-folded term: %a" pp_term t
+    end
 
   (* Bindings *)
   | TmLet(i, b, _, t, tBody) ->
@@ -246,7 +241,14 @@ let rec interp t = withFailTerm t @@ match t with
       interp (tm_substTm t' 0 0 tBody)
   
   | TmSample(i, b, t, tBody) ->
-      interp t >>= fun t -> interp (tm_substTm t 0 0 tBody)
+    (* Do not interpret sample during partial application *)
+    isInPartial >>= fun partial ->
+    if partial then begin
+      interp t >>= fun t ->
+      interp tBody >>= fun tBody ->
+      return @@ TmSample(i, b, t, tBody)
+      end
+    else interp t >>= fun t -> interp (tm_substTm t 0 0 tBody)
 
   (* Type Abstraction and Applicacion *)
   (* These are essentially no-ops, but because we might do type checking 
@@ -280,7 +282,7 @@ let rec interp t = withFailTerm t @@ match t with
 (* Equivalent to run *)
 (* val run_interp : term -> (string * primfun) list -> string *)
 let run_interp program prims =
-  match interp program (None, None, prims) with
+  match interp program (None, false, prims) with
   | (_, Ok (TmPrim(_,PrimTString(s))))  -> s
   | (_, Ok _)       -> interp_error "%s" "Interpreter returned a non-string value"
   | (_, Error s)    -> interp_error "%s" s

@@ -49,6 +49,21 @@ primitive bagsize forall(A) (b :[] A bag) : num { "bagsize" }
 */
 primitive bagshow (b :[] string bag) : string { "bagshow" }
 
+
+/*
+  bagFromFile : string -> bag DATA
+  
+  Given a file name, loads the data in the file into a bag
+*/
+primitive bagFromFile forall(DATA) (file : string) : DATA bag { "bagFromFile" }
+
+/*
+  listbagFromFile : string -> bag list(DATA)
+  
+  Given a file name, loads the data in the file into a bag
+*/
+primitive listbagFromFile forall(DATA) (file : string) : list(DATA) bag { "listbagFromFile" }
+
 /*
   bagsplit : (A -> bool) -> num -> A bag -o ( A bag x A bag ) 
 
@@ -80,6 +95,17 @@ primitive bagsplitins
   Returns the sum of the elements of the bag.
 */
 primitive bagsum (b :[] clipped bag) : num { "bagsum" }
+
+/*
+  bagfoldl : ((A, B) -o A) -> num -> A -o B bag -o A
+
+  Folds the bag.  Requres a timeout argument which is the number of steps to run.
+*/
+primitive bagfoldl forall (A,B) 
+  (f : (A,B) -o A)
+  (timeout : num)
+  (a :[] A)
+  (b :[] B bag) : A { "bagfoldl" }
 
 /*
   bagmap : (A -> B) -> num -> A bag -o B bag

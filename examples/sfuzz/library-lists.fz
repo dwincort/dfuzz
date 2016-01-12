@@ -53,7 +53,7 @@ function length forall (A) (x :[] list(A)) : num {
 // Returns the head of the list or the default argument.
 function head forall (A) (def :[] A) (lst :[] list(A)) : A {
   case unfold lst of {
-     inl(unit) => def
+     inl(_) => def
    | inr(y) => let (elem,rest) = y;
                elem
   }
@@ -61,12 +61,42 @@ function head forall (A) (def :[] A) (lst :[] list(A)) : A {
 
 // tail : list(A) -> list(A)
 // Returns an empty list when given an empty list.
-function tail forall (A)  (il : list(A)) : list(A) {
+function tail forall (A)  (il :[] list(A)) : list(A) {
   case unfold il of {
-     inl(y) => nil@[A]
+     inl(_) => nil@[A]
    | inr(y) => let (elem,rest) = y;
                rest
   }
+}
+
+// uncons : A -o list(A) -o (A, list(A))
+// Returns the head of the list or the default argument.
+function uncons forall (A) (def :[] A) (lst :[] list(A)) : (A, list(A)) {
+  case unfold lst of {
+     inl(_)   => (def, nil@[A])
+   | inr(xxs) => xxs
+  }
+}
+
+function performAt forall(A) (n : int) (f : A -> A) (l : list(A)) : list(A) {
+  case unfold l of {
+    inl(_)   => nil@[A]
+  | inr(xxs) => let (x,xs) = xxs;
+                if (n == 0) then { cons@[A] (f x) xs } 
+                            else { cons@[A] x (performAt@[A] (n .- 1) f xs) }
+  }
+}
+
+
+function zipWith forall(A,B,C) (f : A -o B -o C) (l1 :[] list(A)) (l2 :[] list(B)) : list(C) {
+  case unfold l1 of {
+    inl(x) => nil@[C]
+  | inr(x) => case unfold l2 of {
+                inl(y) => nil@[C]
+              | inr(y) => let (xh,xt) = x; let (yh,yt) = y;
+                          cons@[C] (f xh yh) (zipWith@[A]@[B]@[C] f xt yt)
+              }
+    }
 }
 
 // zip : list(A) -> list(B) -> list((A,B))
@@ -74,14 +104,8 @@ function tail forall (A)  (il : list(A)) : list(A) {
 // zip [1,2] [9,8,7,6,5,4,3] = [(1,9),(2,8)]
 // zip [9,8,7,6,5,4,3] [1,2] = [(9,1),(8,2)]
 function zip forall(A,B) (l1 :[] list(A)) (l2 :[] list(B)) : list((A,B)) {
-  case unfold l1 of {
-    inl(x) => nil@[(A,B)]
-  | inr(x) => case unfold l2 of {
-                inl(y) => nil@[(A,B)]
-              | inr(y) => let (xh,xt) = x; let (yh,yt) = y;
-                          cons@[(A,B)] (xh,yh) ((zip@[A]@[B] xt) yt)
-              }
-    }
+  function pair (a :[] A) (b :[] B) : (A,B) { (a,b) }
+  zipWith@[A]@[B]@[(A,B)] pair l1 l2
 }
 
 
@@ -196,4 +220,31 @@ function listfuzz (fl :[] flist(num)) : fuzzy list(num) {
         return (cons@[num] y (tailsample))
   }
 }
+
+function showList 
+  forall(A) 
+  (pA : A -> string) 
+  (lst : list(A)) 
+  : string {
+    function showListHelper (lst : list(A)) : string {
+        case unfold lst of {
+          inl(_) => "]"
+        | inr(xxs) => let (x,xs) = xxs;
+                      ","^(pA x)^(showListHelper xs)
+        }
+    }
+    case unfold lst of {
+      inl(_) => "[]"
+    | inr(xxs) => let (x,xs) = xxs;
+                  "["^(pA x)^(showListHelper xs)
+    }
+}
+
+/*
+  listFromFile : string -> list(DATA)
+  
+  Given a file name, loads the data in the file into a list
+*/
+primitive listFromFile forall(DATA) (file : string) : list(DATA) { "listFromFile" }
+
 

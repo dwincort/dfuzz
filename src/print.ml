@@ -217,8 +217,9 @@ and string_of_op s = List.assoc s binary_op_table
 
 and string_of_term_prim t = match t with
     PrimTUnit         -> "()"
-  | PrimTNum f        -> string_of_float f
-  | PrimTInt i        -> string_of_int i
+  | PrimTNum f        -> "(num "^string_of_float f^")"
+  | PrimTClipped f    -> "(clip "^string_of_float f^")"
+  | PrimTInt i        -> "(int "^string_of_int i^")"
   | PrimTBool b       -> string_of_bool b
   | PrimTString s     -> ("\"" ^ s ^ "\"")
 

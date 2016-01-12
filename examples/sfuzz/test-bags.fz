@@ -1,0 +1,14 @@
+
+// Testing bags
+
+#include "library-bags.fz"
+
+bdat = listbagFromFile@[num] "examples/data/baglist1.dat";
+
+assertEq@[num]      "Bags #1 " (bagsize@[list(num)] bdat) 6.0;
+assertEq@[string]   "Bags #2 "
+    (bagshow (bagmapins@[list(num)]@[string] 
+        (fun (ln : list(num)) : string { showNum (list_foldl@[num]@[num] op_add 0.0 ln) }) bdat))
+    "6.,9.,12.,15.,18.,21.";
+
+

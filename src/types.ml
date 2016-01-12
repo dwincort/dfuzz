@@ -93,6 +93,7 @@ and  ty =
 and  term_prim =
   | PrimTUnit
   | PrimTNum    of float
+  | PrimTClipped of float
   | PrimTInt    of int
   | PrimTBool   of bool
   | PrimTString of string
@@ -107,6 +108,7 @@ and  term =
      of the interpreter and having the parser look up the strings directly. *)
   | TmPrimFun   of info * string * ty * term list
   
+  (* Note that the type in the TmBag is the type of the whole bag, NOT just the type of the contents. *)
   | TmBag       of info * ty * term list
   | TmPair      of info * term * term
   | TmTensDest  of info * binder_info * binder_info * term * term
@@ -147,9 +149,8 @@ and  primfun = PrimFun of (ty * term list -> term interpreter)
 (* Interpreter monad *)
 (* TODO: The primfun list should be handled by the parser *)
 and  'a interpreter = 
-    (((term * epsilon * epsilon list) option)    (* The database, its budget, and the list of red zone computation sensitivities performed so far *)
-    * context option            (* The context option represents whether we are in partial 
-                                   evaluation mode or not (Some context we are, None we aren't). *)
+    (((term * epsilon * epsilon list) option)   (* The database, its budget, and the list of red zone computation sensitivities performed so far *)
+    * bool                      (* Represents whether we are in partial evaluation mode or not. *)
     * (string * primfun) list)  (* The primfun map is the initial set of primitive function implementations. *)
    -> ((term * epsilon * epsilon list) option   (* The database, its budget, and the list of red zone computation sensitivities as output *)
     * ('a, string) result)      (* the output is either an Ok value or an error with a string. *)

@@ -27,8 +27,6 @@ module InterpMonad : sig
   
   val isInPartial : bool interpreter
   
-  val getTyCheckCtx : context interpreter
-  
   val attemptRedZone : epsilon -> bool interpreter
   
   val getDB : term interpreter
