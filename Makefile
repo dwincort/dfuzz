@@ -1,12 +1,13 @@
 # Program main file
 
 # Ocamlbuild
-OCBOPTS=-use-ocamlfind -pkg unix,menhirLib,why3
+OCBOPTS=-use-ocamlfind -pkg unix,str
+# OCBOPTS=-use-ocamlfind -pkg unix,menhirLib
 OCAMLBUILD=ocamlbuild $(OCBOPTS)
 
 VERSION=native
 
-NAME=dfuzz
+NAME=fuzz
 # Program main file
 MAIN=src/$(NAME)
 

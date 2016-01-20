@@ -31,175 +31,181 @@ open Print
 *)
 
 let di = dummyinfo
+
+module Creation = struct
+  (* The expectation functions take a term and return an ocaml value *)
+  let exBool name tb = match tb with 
+    | TmPrim (_i, PrimTBool b) -> return b
+    | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a bool but found %a" name pp_term tb
+  let exNum name tn = match tn with 
+    | TmPrim (_i, PrimTNum n) -> return n
+    | TmPrim (_i, PrimTInt n) -> return (float_of_int n)
+    | TmPrim (_i, PrimTClipped n) -> return n
+    | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a num but found %a" name pp_term tn
+  let exInt name tn = match tn with 
+    | TmPrim (_i, PrimTInt n) -> return n
+    | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected an int but found %a" name pp_term tn
+  let exString name ts = match ts with 
+    | TmPrim (_i, PrimTString s) -> return s
+    | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a string but found %a" name pp_term ts
+  let exBag name tb = match tb with 
+    | TmBag(_i, _ty, tlst) -> return tlst
+    | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a bag but found %a" name pp_term tb
+  let exPair ex1 ex2 name tp = match tp with 
+    | TmPair(_i, t1, t2) -> ex1 name t1 >>= fun v1 ->
+                            ex2 name t2 >>= fun v2 ->
+                            return (v1, v2)
+    | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a pair but found %a" name pp_term tp
+  let exFun _name t = return t (* Theoretically, we could check that it's actually a function, but we don't need to *)
+  let exAny _name t = return t
+  
+  (* The make functions turn an ocaml value into a term *)
+  let mkBool i b   = TmPrim (i, PrimTBool b)
+  let mkNum i n    = TmPrim (i, PrimTNum n)
+  let mkClipped i c = TmPrim (i, PrimTClipped (if c > 1.0 then 1.0 else if c < 0.0 then 0.0 else c))
+  let mkInt i n    = TmPrim (i, PrimTInt n)
+  let mkString i s = TmPrim (i, PrimTString s)
+  let mkBag i (ty, l) = TmBag (i, ty, l)
+  let mkPair mk1 mk2 i (t1, t2) = TmPair (i, mk1 i t1, mk2 i t2)
+  let mkAny _i t   = t
+  let mkUnit i _   = TmPrim (i, PrimTUnit)
+  
+  (* The fun_of_*_arg* functions are short hands for making the primitives easily *)
+  let fun_of_no_args_with_type_i
+    (name : string)                           (* The name of the function - for debug purposes *)
+    (mk : info -> 'a -> term)                 (* A maker for the result *)
+    (op : ty -> 'a interpreter)               (* The operation to perform *)
+    : primfun = 
+    PrimFun (fun (ty, tlst) -> match tlst with
+      | [] -> op ty >>= fun res -> return (mk di res)
+      | _  -> fail @@ pp_to_string "** Primitive ** " "%s expected no arguments but found %a" name (pp_list pp_term) tlst)
+  
+  let fun_of_1arg_with_type_i
+    (name : string)                           (* The name of the function - for debug purposes *)
+    (earg : string -> term -> 'a interpreter) (* An extractor for the argument *)
+    (mk : info -> 'b -> term)                 (* A maker for the result *)
+    (op : ty -> 'a -> 'b interpreter)         (* The operation to perform *)
+    : primfun = 
+    PrimFun (fun (ty, tlst) -> match tlst with
+      | ta :: []
+          -> earg name ta >>= fun a ->
+             op ty a >>= fun res -> return (mk di res)
+      | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected 1 argument but found %a" name (pp_list pp_term) tlst)
+  
+  let fun_of_1arg_i
+    (name : string)                           (* The name of the function - for debug purposes *)
+    (earg : string -> term -> 'a interpreter) (* An extractor for the argument *)
+    (mk : info -> 'b -> term)                 (* A maker for the result *)
+    (op : 'a -> 'b interpreter)               (* The operation to perform *)
+    : primfun = fun_of_1arg_with_type_i name earg mk (fun _ty x -> op x)
+  
+  let fun_of_1arg
+    (name : string)                           (* The name of the function - for debug purposes *)
+    (earg : string -> term -> 'a interpreter) (* An extractor for the argument *)
+    (mk : info -> 'b -> term)               (* A maker for the result *)
+    (op : 'a -> 'b)                           (* The operation to perform *)
+    : primfun = fun_of_1arg_with_type_i name earg mk (fun _ty x -> return (op x))
+  
+  let fun_of_2args_with_type_i
+    (name : string)                           (* The name of the function - for debug purposes *)
+    (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
+    (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
+    (mk : info -> 'c -> term)                 (* A maker for the result *)
+    (op : ty -> 'a -> 'b -> 'c interpreter)   (* The operation to perform *)
+    : primfun = 
+    PrimFun (fun (ty, tlst) -> match tlst with
+      | ta :: tb :: []
+          -> efst name ta >>= fun a ->
+             esnd name tb >>= fun b ->
+             op ty a b >>= fun res -> return (mk di res)
+      | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected 2 arguments but found %a" name (pp_list pp_term) tlst)
+  
+  let fun_of_2args_i
+    (name : string)                           (* The name of the function - for debug purposes *)
+    (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
+    (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
+    (mk : info -> 'c -> term)                 (* A maker for the result *)
+    (op : 'a -> 'b -> 'c interpreter)         (* The operation to perform *)
+    : primfun = fun_of_2args_with_type_i name efst esnd mk (fun _ty x y -> op x y)
+  
+  let fun_of_2args 
+    (name : string)                           (* The name of the function - for debug purposes *)
+    (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
+    (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
+    (mk : info -> 'c -> term)                 (* A maker for the result *)
+    (op : 'a -> 'b -> 'c)                     (* The operation to perform *)
+    : primfun = fun_of_2args_with_type_i name efst esnd mk (fun _ty x y -> return (op x y))
+  
+  let fun_of_3args_with_type_i
+    (name : string)                           (* The name of the function - for debug purposes *)
+    (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
+    (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
+    (ethd : string -> term -> 'c interpreter) (* An extractor for the second argument *)
+    (mk : info -> 'd -> term)                 (* A maker for the result *)
+    (op : ty -> 'a -> 'b -> 'c -> 'd interpreter) (* The operation to perform *)
+    : primfun = 
+    PrimFun (fun (ty, tlst) -> match tlst with
+      | ta :: tb :: tc :: []
+          -> efst name ta >>= fun a ->
+             esnd name tb >>= fun b ->
+             ethd name tc >>= fun c ->
+             op ty a b c >>= fun res -> return (mk di res)
+      | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected 3 arguments but found %a" name (pp_list pp_term) tlst)
+  
+  let fun_of_3args_i
+    (name : string)                           (* The name of the function - for debug purposes *)
+    (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
+    (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
+    (ethd : string -> term -> 'c interpreter) (* An extractor for the second argument *)
+    (mk : info -> 'd -> term)                 (* A maker for the result *)
+    (op : 'a -> 'b -> 'c -> 'd interpreter)   (* The operation to perform *)
+    : primfun = fun_of_3args_with_type_i name efst esnd ethd mk (fun _ty x y z -> op x y z)
+  
+  let fun_of_3args
+    (name : string)                           (* The name of the function - for debug purposes *)
+    (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
+    (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
+    (ethd : string -> term -> 'c interpreter) (* An extractor for the second argument *)
+    (mk : info -> 'd -> term)                 (* A maker for the result *)
+    (op : 'a -> 'b -> 'c -> 'd)               (* The operation to perform *)
+    : primfun = fun_of_3args_with_type_i name efst esnd ethd mk (fun _ty x y z -> return (op x y z))
+  
+  
+  let fun_of_4args_with_type_i
+    (name : string)                           (* The name of the function - for debug purposes *)
+    (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
+    (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
+    (ethd : string -> term -> 'c interpreter) (* An extractor for the second argument *)
+    (efth : string -> term -> 'd interpreter) (* An extractor for the second argument *)
+    (mk : info -> 'e -> term)                 (* A maker for the result *)
+    (op : ty -> 'a -> 'b -> 'c -> 'd -> 'e interpreter)   (* The operation to perform *)
+    : primfun = 
+    PrimFun (fun (ty, tlst) -> match tlst with
+      | ta :: tb :: tc :: td :: []
+          -> efst name ta >>= fun a ->
+             esnd name tb >>= fun b ->
+             ethd name tc >>= fun c ->
+             efth name td >>= fun d ->
+             op ty a b c d >>= fun res -> return (mk di res)
+      | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected 4 arguments but found %a" name (pp_list pp_term) tlst)
+  
+  let fun_of_4args_i
+    (name : string)                           (* The name of the function - for debug purposes *)
+    (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
+    (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
+    (ethd : string -> term -> 'c interpreter) (* An extractor for the second argument *)
+    (efth : string -> term -> 'd interpreter) (* An extractor for the second argument *)
+    (mk : info -> 'e -> term)                 (* A maker for the result *)
+    (op : 'a -> 'b -> 'c -> 'd -> 'e interpreter) (* The operation to perform *)
+    : primfun = fun_of_4args_with_type_i name efst esnd ethd efth mk (fun _ty a b c d -> op a b c d)
+
+end
+
+open Creation
+
 let message n = Support.Error.message n Support.Options.Interpreter di
 let assertionMsg i = Support.Error.message (-1) Support.Options.Assertion i
-
-
-(* The expectation functions take a term and return an ocaml value *)
-let exBool name tb = match tb with 
-  | TmPrim (_i, PrimTBool b) -> return b
-  | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a bool but found %a" name pp_term tb
-let exNum name tn = match tn with 
-  | TmPrim (_i, PrimTNum n) -> return n
-  | TmPrim (_i, PrimTClipped n) -> return n
-  | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a num but found %a" name pp_term tn
-let exInt name tn = match tn with 
-  | TmPrim (_i, PrimTInt n) -> return n
-  | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected an int but found %a" name pp_term tn
-let exString name ts = match ts with 
-  | TmPrim (_i, PrimTString s) -> return s
-  | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a string but found %a" name pp_term ts
-let exBag name tb = match tb with 
-  | TmBag(_i, _ty, tlst) -> return tlst
-  | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a bag but found %a" name pp_term tb
-let exPair name ex1 ex2 tp = match tp with 
-  | TmPair(_i, t1, t2) -> ex1 name t1 >>= fun v1 ->
-                          ex2 name t2 >>= fun v2 ->
-                          return (v1, v2)
-  | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a pair but found %a" name pp_term tp
-let exFun _name t = return t (* Theoretically, we could check that it's actually a function, but we don't need to *)
-let exAny _name t = return t
-
-(* The make functions turn an ocaml value into a term *)
-let mkBool i b   = TmPrim (i, PrimTBool b)
-let mkNum i n    = TmPrim (i, PrimTNum n)
-let mkClipped i c = TmPrim (i, PrimTClipped c)
-let mkInt i n    = TmPrim (i, PrimTInt n)
-let mkString i s = TmPrim (i, PrimTString s)
-let mkBag i (ty, l) = TmBag (i, ty, l)
-let mkPair mk1 mk2 i (t1, t2) = TmPair (i, mk1 i t1, mk2 i t2)
-let mkAny _i t   = t
-let mkUnit i _   = TmPrim (i, PrimTUnit)
-
-(* The fun_of_*_arg* functions are short hands for making the primitives easily *)
-let fun_of_no_args_with_type_i
-  (name : string)                           (* The name of the function - for debug purposes *)
-  (mk : info -> 'a -> term)                 (* A maker for the result *)
-  (op : ty -> 'a interpreter)               (* The operation to perform *)
-  : primfun = 
-  PrimFun (fun (ty, tlst) -> match tlst with
-    | [] -> op ty >>= fun res -> return (mk di res)
-    | _  -> fail ("** Primitive ** "^name^" expected no arguments but found something else."))
-
-let fun_of_1arg_with_type_i
-  (name : string)                           (* The name of the function - for debug purposes *)
-  (earg : string -> term -> 'a interpreter) (* An extractor for the argument *)
-  (mk : info -> 'b -> term)                 (* A maker for the result *)
-  (op : ty -> 'a -> 'b interpreter)         (* The operation to perform *)
-  : primfun = 
-  PrimFun (fun (ty, tlst) -> match tlst with
-    | ta :: []
-        -> earg name ta >>= fun a ->
-           op ty a >>= fun res -> return (mk di res)
-    | _ -> fail ("** Primitive ** "^name^" expected 1 argument but found something else."))
-
-let fun_of_1arg_i
-  (name : string)                           (* The name of the function - for debug purposes *)
-  (earg : string -> term -> 'a interpreter) (* An extractor for the argument *)
-  (mk : info -> 'b -> term)                 (* A maker for the result *)
-  (op : 'a -> 'b interpreter)               (* The operation to perform *)
-  : primfun = fun_of_1arg_with_type_i name earg mk (fun _ty x -> op x)
-
-let fun_of_1arg
-  (name : string)                           (* The name of the function - for debug purposes *)
-  (earg : string -> term -> 'a interpreter) (* An extractor for the argument *)
-  (mk : info -> 'b -> term)               (* A maker for the result *)
-  (op : 'a -> 'b)                           (* The operation to perform *)
-  : primfun = fun_of_1arg_with_type_i name earg mk (fun _ty x -> return (op x))
-
-let fun_of_2args_with_type_i
-  (name : string)                           (* The name of the function - for debug purposes *)
-  (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
-  (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
-  (mk : info -> 'c -> term)                 (* A maker for the result *)
-  (op : ty -> 'a -> 'b -> 'c interpreter)   (* The operation to perform *)
-  : primfun = 
-  PrimFun (fun (ty, tlst) -> match tlst with
-    | ta :: tb :: []
-        -> efst name ta >>= fun a ->
-           esnd name tb >>= fun b ->
-           op ty a b >>= fun res -> return (mk di res)
-    | _ -> fail ("** Primitive ** "^name^" expected 2 arguments but found something else."))
-
-let fun_of_2args_i
-  (name : string)                           (* The name of the function - for debug purposes *)
-  (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
-  (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
-  (mk : info -> 'c -> term)                 (* A maker for the result *)
-  (op : 'a -> 'b -> 'c interpreter)         (* The operation to perform *)
-  : primfun = fun_of_2args_with_type_i name efst esnd mk (fun _ty x y -> op x y)
-
-let fun_of_2args 
-  (name : string)                           (* The name of the function - for debug purposes *)
-  (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
-  (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
-  (mk : info -> 'c -> term)                 (* A maker for the result *)
-  (op : 'a -> 'b -> 'c)                     (* The operation to perform *)
-  : primfun = fun_of_2args_with_type_i name efst esnd mk (fun _ty x y -> return (op x y))
-
-let fun_of_3args_with_type_i
-  (name : string)                           (* The name of the function - for debug purposes *)
-  (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
-  (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
-  (ethd : string -> term -> 'c interpreter) (* An extractor for the second argument *)
-  (mk : info -> 'd -> term)                 (* A maker for the result *)
-  (op : ty -> 'a -> 'b -> 'c -> 'd interpreter) (* The operation to perform *)
-  : primfun = 
-  PrimFun (fun (ty, tlst) -> match tlst with
-    | ta :: tb :: tc :: []
-        -> efst name ta >>= fun a ->
-           esnd name tb >>= fun b ->
-           ethd name tc >>= fun c ->
-           op ty a b c >>= fun res -> return (mk di res)
-    | _ -> fail ("** Primitive ** "^name^" expected 3 arguments but found something else."))
-
-let fun_of_3args_i
-  (name : string)                           (* The name of the function - for debug purposes *)
-  (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
-  (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
-  (ethd : string -> term -> 'c interpreter) (* An extractor for the second argument *)
-  (mk : info -> 'd -> term)                 (* A maker for the result *)
-  (op : 'a -> 'b -> 'c -> 'd interpreter)   (* The operation to perform *)
-  : primfun = fun_of_3args_with_type_i name efst esnd ethd mk (fun _ty x y z -> op x y z)
-
-let fun_of_3args
-  (name : string)                           (* The name of the function - for debug purposes *)
-  (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
-  (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
-  (ethd : string -> term -> 'c interpreter) (* An extractor for the second argument *)
-  (mk : info -> 'd -> term)                 (* A maker for the result *)
-  (op : 'a -> 'b -> 'c -> 'd)               (* The operation to perform *)
-  : primfun = fun_of_3args_with_type_i name efst esnd ethd mk (fun _ty x y z -> return (op x y z))
-
-
-let fun_of_4args_with_type_i
-  (name : string)                           (* The name of the function - for debug purposes *)
-  (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
-  (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
-  (ethd : string -> term -> 'c interpreter) (* An extractor for the second argument *)
-  (efth : string -> term -> 'd interpreter) (* An extractor for the second argument *)
-  (mk : info -> 'e -> term)                 (* A maker for the result *)
-  (op : ty -> 'a -> 'b -> 'c -> 'd -> 'e interpreter)   (* The operation to perform *)
-  : primfun = 
-  PrimFun (fun (ty, tlst) -> match tlst with
-    | ta :: tb :: tc :: td :: []
-        -> efst name ta >>= fun a ->
-           esnd name tb >>= fun b ->
-           ethd name tc >>= fun c ->
-           efth name td >>= fun d ->
-           op ty a b c d >>= fun res -> return (mk di res)
-    | _ -> fail ("** Primitive ** "^name^" expected 4 arguments but found something else."))
-
-let fun_of_4args_i
-  (name : string)                           (* The name of the function - for debug purposes *)
-  (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
-  (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
-  (ethd : string -> term -> 'c interpreter) (* An extractor for the second argument *)
-  (efth : string -> term -> 'd interpreter) (* An extractor for the second argument *)
-  (mk : info -> 'e -> term)                 (* A maker for the result *)
-  (op : 'a -> 'b -> 'c -> 'd -> 'e interpreter) (* The operation to perform *)
-  : primfun = fun_of_4args_with_type_i name efst esnd ethd efth mk (fun _ty a b c d -> op a b c d)
-
+let printMsg i = Support.Error.message (-1) Support.Options.General i
 
 
 (*****************************************************************************)
@@ -210,6 +216,20 @@ let fun_of_4args_i
 let onlyInFullEval (name : string) (f : 'a interpreter) : 'a interpreter = 
   isInPartial >>= fun b ->
   if b then fail (name^" not to be evaluated during partial evaluation") else f
+
+
+(*****************************************************************************)
+(* Here is the primitive for case on integers. *)
+
+let rec intToPeanoFun
+  (ty : ty)
+  (n : int)
+  : term interpreter = 
+    if (n <= 0) then
+      return @@ TmFold(di, ty, TmLeft(di, mkUnit di (), ty))
+    else
+      intToPeanoFun ty (n - 1) >>= fun n' ->
+      return @@ TmFold(di, ty, TmRight(di, n', TyPrim PrimUnit))
 
 
 (*****************************************************************************)
@@ -231,6 +251,34 @@ let assertEqFun
               else pp_to_string "FAIL " "(%a != %a)" pp_term t1 pp_term t2
     in assertionMsg di "%s: %s" s res; ()
 
+let tyCheckFuzzFun
+  (sens : float)
+  (f : term)
+  : term interpreter =
+    onlyInFullEval "tyCheckFuzz" (return ()) >>
+    let genFailResult s = return (TmLeft(di, TmPrim(di, PrimTString s), TyPrim PrimUnit)) in
+    message 3 "--- tyCheckFuzz: Before Partial evaluation: %a" pp_term f;
+    inPartial (Interpreter.interp f) >>= fun pf ->
+    message 3 "--- tyCheckFuzz: Partial evaluation results in: %a" pp_term pf;
+    match Tycheck.type_of pf (Ctx.empty_context, true) with 
+        | Error e -> genFailResult @@ pp_to_string "" "%a" Tycheck.pp_tyerr e.v
+        | Ok (tyf, _) -> begin
+      message 3 "--- tyCheckFuzz: Type checking completed and found type: %a" pp_type tyf;
+      (match tyf with
+        | TyLollipop(_, si, _) -> begin match si with
+              | SiConst n -> if n <= sens then return (Ok n) else return (Error 
+                  ("tyCheckFuzz expected a "^string_of_float sens^"-sensitive function but found a "^string_of_float n^"-sensitive function"))
+              | SiInfty -> return @@ Error 
+                  ("tyCheckFuzz expected a "^string_of_float sens^"-sensitive function but found an infinitely sensitive function")
+              | _ -> fail @@ pp_to_string "**Primitive** " "tyCheckFuzz found an unexpected sensitivity: %a" pp_si si
+            end
+        | _ -> fail @@ pp_to_string "**Primitive** " "tyCheckFuzz's function argument has non-lollipop type: %a" pp_type tyf
+      ) >>= fun succ ->
+      match succ with
+        | Error s -> genFailResult s
+        | Ok n -> return (TmRight(di, mkUnit di (), TyPrim PrimString))
+    end
+
 let runRedZone
   (ty : ty)
   (sens : float)
@@ -240,7 +288,7 @@ let runRedZone
     let genFailResult s = begin 
         match ty with
             | TyUnion(_, aty) -> return (TmLeft(di, TmPrim(di, PrimTString s), aty))
-            | _ -> fail "runRedZone Internal: Weird type in runRedZone return type"
+            | _ -> fail @@ pp_to_string "**Primitive** " "runRedZone found an unexpected return type: %a" pp_type ty
         end in
     getDB >>= fun db ->
     message 3 "--- RunRedZone: Before Partial evaluation: %a" pp_term f;
@@ -256,9 +304,10 @@ let runRedZone
                   ("runRedZone expected a "^string_of_float sens^"-sensitive function but found a "^string_of_float n^"-sensitive function"))
               | SiInfty -> return @@ Error 
                   ("runRedZone expected a "^string_of_float sens^"-sensitive function but found an infinitely sensitive function")
-              | _ -> fail "runRedZone Internal: The sensitivity of the function argument was unexpected"
+              | _ -> fail @@ pp_to_string "**Primitive** " "runRedZone found an unexpected sensitivity: %a" pp_si si
             end
-        | _ -> fail "runRedZone Internal: The function argument was of the wrong form") >>= fun succ ->
+        | _ -> fail @@ pp_to_string "**Primitive** " "runRedZone's function argument has non-lollipop type: %a" pp_type tyf
+      ) >>= fun succ ->
       match succ with
         | Error s -> genFailResult s
         | Ok n -> attemptRedZone n >>= fun succ ->
@@ -267,22 +316,21 @@ let runRedZone
     end
 
 (* Here are ones specifically for bag stuff. *)
-let bagshowFun
+let showBagFun
   (b : term list)
   : string interpreter =
-    mapM (exString "bagshow") b >>= fun strList ->
+    mapM (exString "showBag") b >>= fun strList ->
     return @@ String.concat "," strList
 
 let rec bagfoldlFun
   (f : term)
-  (timeout : float)
   (a : term)
   (bbag : term list)
   : term interpreter = 
     match bbag with
     | [] -> return a
-    | b::bs -> Interpreter.interp (TmApp(di, f, TmPair(di, a, b))) >>= fun x ->
-               bagfoldlFun f timeout x bs
+    | b::bs -> Interpreter.interp (TmApp(di, TmApp(di, f, a), b)) >>= fun x ->
+               bagfoldlFun f x bs
 
 let bagmapFun 
   (ty : ty)
@@ -299,7 +347,7 @@ let bagsplitFun
   : ((ty * term list) * (ty * term list)) interpreter = 
     (match oty with
       | TyTensor(ty,_)  -> return ty
-      | _               -> fail ("** Primitive ** bagmap expected a Tensor output but found something else.")
+      | _               -> fail @@ pp_to_string "** Primitive ** " "bagsplit expected a tensor output but found %a" pp_type oty
     ) >>= fun bty ->
     mapM (fun tm -> Interpreter.interp (TmApp(di, f, tm)) >>= exBool "bagsplit" >>= fun res -> return (tm, res)) b >>= fun lst ->
     let (lst1, lst2) = List.partition snd lst in
@@ -310,7 +358,7 @@ let bagsplitFun
 let addNoiseFun
   (eps : float)
   (n : float)
-  : float = n +. (Math.lap eps)
+  : float = n +. Math.lap eps
 
 
 (* expMechFun : num[e] -> (R -> DB -o fuzzy num) -> R bag -> DB -o[e] fuzzy R *)
@@ -338,11 +386,11 @@ let expMechOnePassFun
   (db : term)
   : term interpreter = 
     Interpreter.interp (TmApp(di, quality, db)) >>= exBag "expMechOnePass" >>= fun resbag ->
-    mapM (exPair "expMechOnePass" exAny exNum) resbag >>= fun rnumlist ->
+    mapM (exPair exAny exNum "expMechOnePass") resbag >>= fun rnumlist ->
     let problist = List.map (fun (r,q) -> (r, q +. Math.lap (2.0 /. eps))) rnumlist in
-(*    Support.Error.message 3 Support.Options.Interpreter Support.FileInfo.dummyinfo 
+(*    Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
       "--- expMech: Probabilities are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) problist));*)
-    let (res, _) = List.fold_left 
+    let (res, i) = List.fold_left 
             (fun best r -> if snd r > snd best then r else best)
             (mkUnit di (), neg_infinity) problist in
     return res
@@ -365,11 +413,10 @@ let fileLines (filename : string) =
 let typeToMaker (ty : ty) : (string -> term) interpreter = match ty with
   | TyPrim PrimNum  -> return (fun s -> mkNum di (float_of_string s))
   | TyPrim PrimInt  -> return (fun s -> mkInt di (int_of_string s))
-  | TyPrim PrimUnit -> return (fun s -> TmPrim (di, PrimTUnit))
+  | TyPrim PrimUnit -> return (mkUnit di)
   | TyPrim PrimBool -> return (fun s -> mkBool di (bool_of_string s))
   | TyPrim PrimString   -> return (mkString di)
-  | TyPrim PrimClipped  -> return (fun s -> mkClipped di (let x = float_of_string s in 
-                                                          if x > 1. then 1. else (if x < 0. then 0. else x)))
+  | TyPrim PrimClipped  -> return (fun s -> mkClipped di (float_of_string s))
   | _ -> fail @@ pp_to_string "" "**Primitive** unsupported read type: %a." pp_type ty
 
 (* Here are the *fromFile primitives. *)
@@ -416,17 +463,16 @@ let listbagFromFileFun
 
 
 
-
 (* Core primitive definitions for the runtime *)
 let prim_list : (string * primfun) list = [
 
 (* &-pair destruction *)
 ("_fst", PrimFun (fun (_, t) -> match t with
     | TmAmpersand(i, ta, tb) :: [] -> return ta
-    | _ -> fail "**Primitive** fst expected an &-pair but didn't find one."));
+    | _ -> fail @@ pp_to_string "** Primitive ** " "fst expected an &-pair but found %a" (pp_list pp_term) t));
 ("_snd", PrimFun (fun (_, t) -> match t with
     | TmAmpersand(i, ta, tb) :: [] -> return tb
-    | _ -> fail "**Primitive** snd expected an &-pair but didn't find one."));
+    | _ -> fail @@ pp_to_string "** Primitive ** " "snd expected an &-pair but found %a" (pp_list pp_term) t));
 
 (* Logical Operators *)
 
@@ -453,27 +499,31 @@ let prim_list : (string * primfun) list = [
 ("div3", fun_of_1arg "div3" exNum mkNum (fun n -> n /. 3.0));
 ("_exp", fun_of_1arg "_exp" exNum mkNum ( exp ));
 ("_abs", fun_of_1arg "_abs" exNum mkNum ( abs_float ));
+("cswp", fun_of_1arg "cswp" (exPair exNum exNum) (mkPair mkNum mkNum) (fun (x,y) -> if x < y then (x,y) else (y,x)));
 
 (* Integer primitives *)
 ("_iadd", fun_of_2args "_iadd" exInt exInt mkInt ( + ));
 ("_isub", fun_of_2args "_isub" exInt exInt mkInt ( - ));
 ("_imul", fun_of_2args "_imul" exInt exInt mkInt ( * ));
 ("_idiv", fun_of_2args "_idiv" exInt exInt mkInt ( / ));
+("intToPeano", fun_of_1arg_with_type_i "intToPeano" exInt mkAny intToPeanoFun);
 
 (* clip creation *)
-("clip", fun_of_1arg "clip" exNum mkClipped (fun x -> if x > 1.0 then 1.0 else if x < 0.0 then 0.0 else x));
+("clip", fun_of_1arg "clip" exNum mkClipped (fun x -> x));
 ("fromClip", fun_of_1arg "fromClip" exNum mkNum (fun x -> x));
 
 (* String operations *)
 ("string_cc", fun_of_2args "string_cc" exString exString mkString ( ^ ));
 
 (* Show functions *)
-("showNum", fun_of_1arg "showNum" exNum mkString ( string_of_float ));
+("showNum", fun_of_1arg "showNum" exNum mkString ( fun n -> if n = floor n then string_of_int (truncate n) else string_of_float n ));
 ("showInt", fun_of_1arg "showInt" exInt mkString ( string_of_int ));
+("showBag", fun_of_1arg_i "showBag" exBag mkString showBagFun);
 
 (* Testing Utilities *)
 ("assert",   fun_of_2args "assert"   exString exBool mkUnit assertFun);
 ("assertEq", fun_of_3args "assertEq" exString exAny exAny mkUnit assertEqFun);
+("print",   fun_of_1arg "print"   exString mkUnit (fun s -> printMsg di "%s" s ; ()));
 
 (* Probability monad operations *)
 ("_return", fun_of_1arg "_return" exAny mkAny (fun x -> x));
@@ -481,8 +531,9 @@ let prim_list : (string * primfun) list = [
 ("loadDB", fun_of_2args_i "loadDB" exAny exNum mkUnit storeDB);
 
 (* Red zone activation primitives *)
+("tyCheckFuzz", fun_of_2args_i "tyCheckFuzz" exNum exAny mkAny tyCheckFuzzFun);
 ("runRedZone", fun_of_1arg_with_type_i "runRedZone" exFun mkAny (fun ty tm -> runRedZone ty 1.0 tm));
-("runRedZoneS", fun_of_2args_with_type_i "runRedZone" exNum exFun mkAny runRedZone);
+("runRedZoneS", fun_of_2args_with_type_i "runRedZoneS" exNum exFun mkAny runRedZone);
 
 ("getDelta",   fun_of_1arg_i "getDelta"   exAny mkNum (fun _ -> onlyInFullEval "getDelta"   getDelta));
 ("getEpsilon", fun_of_1arg_i "getEpsilon" exAny mkNum (fun _ -> onlyInFullEval "getEpsilon" getEpsilon));
@@ -494,9 +545,8 @@ let prim_list : (string * primfun) list = [
 ("bagjoin", fun_of_2args_with_type_i "bagjoin" exBag exBag mkBag
   (fun ty b1 b2 -> return (ty, List.append b1 b2)));
 ("bagsize", fun_of_1arg "bagsize" exBag mkNum (fun l -> float_of_int (List.length l)));
-("bagshow", fun_of_1arg_i "bagshow" exBag mkString bagshowFun);
 
-("bagfoldl", fun_of_4args_i "bagfoldl" exAny exNum exAny exBag mkAny bagfoldlFun);
+("bagfoldl", fun_of_4args_i "bagfoldl" exNum exAny exAny exBag mkAny (fun _ -> bagfoldlFun));
 
 ("bagmapins", fun_of_2args_with_type_i "bagmapins" exFun exBag mkBag bagmapFun);
 ("bagmap", fun_of_3args_with_type_i "bagmap" exFun exNum exBag mkBag 

@@ -76,6 +76,9 @@ let rec pp_list pp fmt l = match l with
   | csx :: []  -> fprintf fmt "%a" pp csx
   | csx :: csl -> fprintf fmt "%a,@ %a" pp csx (pp_list pp) csl
 
+let pp_pair ppl ppr fmt pair = 
+  let (l,r) = pair in fprintf fmt "(%a,@ %a)" ppl l ppr r
+
 (* Not worth it, we usually need very custom printers in option cases *)
 
 (* let pp_option pp fmt o = match o with *)
@@ -250,7 +253,7 @@ and pp_term ppf t =
     TmVar(_, v)             -> fprintf ppf "%a" pp_vinfo v
   (* Primitive terms *)
   | TmPrim(_, pt)           -> fprintf ppf "%s" (string_of_term_prim pt)
-  | TmPrimFun(_, n, _, tmlst)   -> fprintf ppf "primitive function %s with args: [%a]" n (pp_list pp_term) tmlst
+  | TmPrimFun(_, n, _, tmlst)   -> fprintf ppf "primitive function %s with args: [%a]" n (pp_list (pp_pair pp_term pp_type)) tmlst
   
   (* Bags *)
   | TmBag(_, ty, tmlst)         -> fprintf ppf "Bag[%a]{%a}" pp_type ty (pp_list pp_term) tmlst
@@ -261,8 +264,8 @@ and pp_term ppf t =
   | TmTensDest(_, x, y, tm, term) -> fprintf ppf "@[<v>let (%a,%a) : = @[%a@];@,@[%a@]@]" pp_binfo x pp_binfo y pp_term tm pp_term term
   | TmAmpersand(_, tm1, tm2)          -> fprintf ppf "(|@[%a@], @[%a@]|)" pp_term tm1 pp_term tm2
 
-  | TmLeft(_, tm, _)    -> fprintf ppf "Left @[%a@]" pp_term tm
-  | TmRight(_, tm, _)   -> fprintf ppf "Right @[%a@]" pp_term tm
+  | TmLeft (_, tm, ty)   -> fprintf ppf "Left[%a] @[%a@]"  pp_type ty pp_term tm
+  | TmRight(_, tm, ty)   -> fprintf ppf "Right[%a] @[%a@]" pp_type ty pp_term tm
   
   (* Data type manipulation *)
   | TmTypedef(_, n, ty, tm)    -> fprintf ppf "@[<v>typedef %a = %a;@,@[%a@]@]" pp_binfo n pp_type ty pp_term tm
@@ -288,7 +291,7 @@ and pp_term ppf t =
   (* Case expressions *)
   | TmUnionCase(_, tm, ln, ltm, rn, rtm) ->
     (* Alternative using vertical boxes *)
-    fprintf ppf "case @[%a@] return of {@\n   inl(%a) @<1>%s @[%a@]@\n | inr(%a) @<1>%s @[%a@]@\n}"
+    fprintf ppf "case @[%a@] of {@\n   inl(%a) @<1>%s @[%a@]@\n | inr(%a) @<1>%s @[%a@]@\n}"
       pp_term tm
       pp_binfo ln (u_sym Symbols.DblArrow) pp_term ltm
       pp_binfo rn (u_sym Symbols.DblArrow) pp_term rtm

@@ -217,7 +217,7 @@ module TypeSens = struct
     si_simpl' sir >>= fun sir ->
     let res = match sil, sir with
       | _, SiInfty -> true
-      | SiConst l, SiConst r -> (l <= r)
+      | SiConst l, SiConst r -> (l <= r +. 0.0001)
       | _, _ -> false
     in if res then return () else fail i @@ SensError(sil, sir)
   
@@ -282,9 +282,10 @@ module TypeSub = struct
   
   let check_prim_sub (i : info) (ty_f : ty_prim) (ty_a : ty_prim) : unit checker =
     match ty_f, ty_a with
-    | PrimNum, PrimClipped -> return ()
-    | _   when ty_f = ty_a -> return ()
-    | _                    -> fail i @@ NotSubtype (TyPrim ty_f, TyPrim ty_a)
+    | PrimNum, PrimClipped  -> return ()
+    | PrimNum, PrimInt      -> return ()
+    | _   when ty_f = ty_a  -> return ()
+    | _                     -> fail i @@ NotSubtype (TyPrim ty_f, TyPrim ty_a)
 
   (* Check whether ty_1 is a subtype of ty_2, generating the necessary
      constraints along the way. *)
@@ -425,12 +426,20 @@ let rec type_of (t : term) : (ty * si list) checker  =
     get_ctx_length >>= fun len ->
     return (type_of_prim pt, zeros len)
 
-  | TmPrimFun(i, s, ty, tmlst) ->
+  | TmPrimFun(i, s, ty, tmtylst) ->
+    ty_debug (tmInfo t) "--> [%3d] Type checking primfun %s" !ty_seq s;
     si_simpl_ty ty >>= fun ty ->
+    mapM (fun (tm,ety) -> 
+      type_of tm >>= fun (aty, _) ->
+      ty_debug (tmInfo t) "--> [%3d] %s Verifying that type %a is a subtype of type %a" !ty_seq s Print.pp_type aty Print.pp_type ety;
+      check_type_sub i ety aty) tmtylst >>
     get_ctx_length >>= fun len ->
     return (ty, zeros len)
   
-  | TmBag(_, ty, tmlst) -> 
+  | TmBag(i, ty, tmlst) -> 
+    mapM (fun tm -> 
+      type_of tm >>= fun (aty, _) ->
+      check_type_sub i aty ty) tmlst >>
     get_ctx_length >>= fun len ->
     return (ty, zeros len)
     
@@ -496,7 +505,8 @@ let rec type_of (t : term) : (ty * si list) checker  =
 
     with_extended_ctx i b_x.b_name ty_x (type_of e) >>= fun (ty_e, si_x, sis_e) ->
 
-    ty_debug (tmInfo t) "### [%3d] Sample for binder @[%a@] with sens @[%a@]" !ty_seq P.pp_binfo b_x P.pp_si si_x;
+(*     ty_debug (tmInfo t) "### [%3d] Sample for binder @[%a@] with sens @[%a@]" !ty_seq P.pp_binfo b_x P.pp_si si_x; *)
+    reportSensitivity 4 (tmInfo t) b_x si_x >>= fun si_x ->
 
     check_fuzz_shape i ty_e                         >>
 
@@ -580,6 +590,8 @@ let rec type_of (t : term) : (ty * si list) checker  =
     reportSensitivity 4 (tmInfo t) b_x si_x          >>= fun si_x ->
     reportSensitivity 4 (tmInfo t) b_y si_y          >>= fun si_y ->
     
+    (* TODO: Rather than check_type_sub in both directions, we want to find the 
+             most general type of tyl and tyr and return that. *)
     check_type_sub i tyr tyl >>
     check_type_sub i tyl tyr >>
 
@@ -617,7 +629,7 @@ let rec type_of (t : term) : (ty * si list) checker  =
 
   decr ty_seq;
   (* We limit pp_term *)
-  ty_debug (tmInfo t) "<-- [%3d] Exit type_of : @[%a@] with type @[%a@]" !ty_seq
+  ty_debug (tmInfo t) "<-- [%3d] Exit  type_of: @[%a@] with type @[%a@]" !ty_seq
     (Print.limit_boxes Print.pp_term) t Print.pp_type ty;
 
   return (ty, sis)

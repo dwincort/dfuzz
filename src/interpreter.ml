@@ -135,7 +135,8 @@ open InterpMonad
 let rec interp t = withFailTerm t @@ match t with
   | TmPrim(i,pt) -> return t
   
-  | TmPrimFun(_i, s, ty, tmlst)  ->
+  | TmPrimFun(_i, s, ty, tmtylst)  ->
+      let tmlst = List.map fst tmtylst in
       if List.fold_left (fun b tm -> b && tmIsVal tm) true tmlst
       then begin
         lookup_prim s >>= fun f -> 
@@ -157,7 +158,10 @@ let rec interp t = withFailTerm t @@ match t with
       withFailTerm (TmTensDest(i, b1, b2, t', tBody))
       begin match t' with
         | TmPair (i', t1', t2') -> interp (tm_substTm t1' 0 0 (tm_substTm t2' 0 0 tBody))
-        | _ -> fail @@ pp_to_string "**Interpreter** " "TensDest expected a pair but found %a." pp_term t'
+        | _ ->  isInPartial >>= fun partial ->
+                if partial
+                then (interp tBody >>= fun tBody' -> return @@ TmTensDest(i, b1, b2, t', tBody'))
+                else fail @@ pp_to_string "**Interpreter** " "TensDest expected a pair but found %a." pp_term t'
       end
   
   (* & constructor *)
@@ -171,12 +175,17 @@ let rec interp t = withFailTerm t @@ match t with
   
   | TmUnionCase(i, t, bl, tlBody, br, trBody) ->
       interp t >>= fun t' -> 
-      interp_debug i "--- Interpreting a union of: %a" Print.pp_term t';
+      interp_debug3 i "--- Interpreting a union of: %a" Print.pp_term t';
       withFailTerm (TmUnionCase(i, t', bl, tlBody, br, trBody))
       begin match t' with
         | TmLeft (i',tl,_) -> interp (tm_substTm tl 0 0 tlBody)
         | TmRight(i',tr,_) -> interp (tm_substTm tr 0 0 trBody)
-        | _                -> fail @@ pp_to_string "**Interpreter** " "Union expected a sum value but found %a" pp_term t'
+        | _                -> isInPartial >>= fun partial ->
+                              if partial
+                              then ((*interp tlBody >>= fun tlBody -> 
+                                    interp trBody >>= fun trBody -> *)
+                                    return @@ TmUnionCase(i, t', bl, tlBody, br, trBody))
+                              else fail @@ pp_to_string "**Interpreter** " "Union expected a sum value but found %a" pp_term t'
       end
 
   (* Regular Abstraction and Applicacion *)
@@ -186,26 +195,28 @@ let rec interp t = withFailTerm t @@ match t with
      some way to represent this partial appliaction, so we actually do a 
      little type checking.  It's a little odd, but I believe it's the 
      most elegant solution. *)
-  | TmApp(i, tf, ta) -> interp_debug i "--- Entering application interpretation: %a" Print.pp_term t;
-      interp ta >>= fun ta -> 
-      interp tf >>= fun tf ->
-      interp_debug i "--- Interpreting an application of %a with argument %a" Print.pp_term tf Print.pp_term ta;
-      withFailTerm (TmApp(i, tf, ta))
-      begin if not (tmIsVal ta)
-        then fail @@ pp_to_string "**Interpreter** " "Application expected a fully evaluated argument but found %a." pp_term ta
-        else begin match tf with
-        | TmAbs(_,bi,_, _, t) -> interp (tm_substTm ta 0 0 t) 
-        | TmTyAbs(i, bi, tm) ->
-          (* The case of inferred application. *)
-          interp (TmApp(i, tm, ta))
-        | _ -> fail @@ pp_to_string "**Interpreter** " "Application expected a Prim or Lambda value but found %a." pp_term tf
-        end
+  | TmApp(i, tf, ta) -> interp_debug3 i "--- Entering application interpretation: %a" Print.pp_term t;
+      interp ta >>= fun ta ->
+      if not (tmIsVal ta) then
+        interp tf >>= fun tf ->
+        withFailTerm (TmApp(i, tf, ta))
+          (fail @@ pp_to_string "**Interpreter** " "Application expected a fully evaluated argument but found %a." pp_term ta)
+      else begin match tf with
+      | TmAbs(_,_,_,_,t) -> interp (tm_substTm ta 0 0 t)
+      | _    -> interp tf >>= fun tf -> 
+                begin match tf with
+                        | TmAbs(_,_,_,_,t) -> interp (tm_substTm ta 0 0 t) 
+                          (* The case of inferred application. TODO: This should really propogate the found type. *)
+                        | TmTyAbs(i, bi, tm)  -> interp (TmApp(i, tm, ta))
+                        | _ -> withFailTerm (TmApp(i, tf, ta))
+                                (fail @@ pp_to_string "**Interpreter** " "Application expected a Prim or Lambda value but found %a." pp_term tf)
+                end
       end
   
   | TmAbs(i, bi, (si, ty), tyo, tm) -> 
     isInPartial >>= fun goUnder ->
     if goUnder then begin
-      interp_debug i "%s" "--- Interpreter: Going under a lambda.";
+      interp_debug3 i "%s" "--- Interpreter: Going under a lambda.";
       mapMSi interp si >>= fun si ->
       mapMTy interp ty >>= fun ty ->
       (match tyo with
@@ -213,7 +224,7 @@ let rec interp t = withFailTerm t @@ match t with
         | Some t -> mapMTy interp t >>= fun x -> return (Some x)
       ) >>= fun tyo ->
       interp tm >>= fun tm ->
-      interp_debug i "%s" "--- Interpreter: Exiting a lambda.";
+      interp_debug3 i "%s" "--- Interpreter: Exiting a lambda.";
       return @@ TmAbs(i, bi, (si, ty), tyo, tm)
       end
     else return t
@@ -230,13 +241,18 @@ let rec interp t = withFailTerm t @@ match t with
     end
 
   (* Bindings *)
-  | TmLet(i, b, _, t, tBody) ->
+  | TmLet(i, b, si, t, tBody) ->
       interp t >>= fun t -> 
-      interp_debug i "--- Interpreting let: Replacing %s with %a." b.b_name Print.pp_term t;
-      interp_debug i "--- Finishing let.  New term is: %a." Print.pp_term (tm_substTm t 0 0 tBody);
-      interp (tm_substTm t 0 0 tBody)
+(*      interp_debug i "--- Interpreting let: Replacing %s with %a." b.b_name Print.pp_term t;
+      interp_debug i "--- Finishing let.  New term is: %a." Print.pp_term (tm_substTm t 0 0 tBody);*)
+      isInPartial >>= fun partial ->
+      if partial && (not (tmIsVal t))
+      then interp tBody >>= fun tBody -> return (TmLet(i,b,si,t,tBody))
+      else interp (tm_substTm t 0 0 tBody)
   
   | TmLetRec(i, b, ty, t, tBody) ->
+(*      isInPartial >>= fun partial ->
+      (if partial then interp t else return t) >>= fun t ->*)
       let t' = tm_substTm (TmLetRec(i, b, ty, t, TmVar(i,var_from_binder 0 b))) 0 0 t in
       interp (tm_substTm t' 0 0 tBody)
   
@@ -257,7 +273,7 @@ let rec interp t = withFailTerm t @@ match t with
   | TmTyApp(i, t, ty) ->
       interp t >>= fun t ->
       withFailTerm (TmTyApp(i, t, ty))
-      begin if false (*not (tyIsVal ty)*)
+      begin if not (tyIsVal ty)
         then fail @@ pp_to_string "**Interpreter** " "Type Application expected a fully evaluated type but found %a." pp_type ty
         else begin match t with
         | TmTyAbs(i', bi, tm)       -> interp (tm_substTy ty 0 0 tm)
@@ -267,7 +283,7 @@ let rec interp t = withFailTerm t @@ match t with
 
   (* Type definitions *)
   | TmTypedef(i,b,ty,tm) -> 
-    interp_debug i "--- Interpreting typedef: New term is %a." Print.pp_term t;
+    interp_debug3 i "--- Interpreting typedef: New term is %a." Print.pp_term t;
     interp(tm_substTy (ty_shiftTy 0 (-1) ty) 0 0 tm)
   
   | TmIfThenElse(i, test, tterm, eterm) ->

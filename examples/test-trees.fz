@@ -10,10 +10,10 @@ l123 = cons@[num] 1.0 (cons@[num] 2.0 (cons@[num] 3.0 nil@[num]));
 
 
 ts = makeTrees@[num]@[bool] l123 bools treeT;
-strs = list_map@[tree(num, bool)]@[string] (printTree@[num]@[bool] showNum showBool) ts;
+strs = list_map@[tree(num, bool)]@[string] (showTree@[num]@[bool] showNum showBool) ts;
 
 assertEq@[string] "Trees #1" 
-    "(1.,true,false)(1.,false,true)(2.,true,false)(2.,false,true)(3.,true,false)(3.,false,true)" 
+    "(1,true,false)(1,false,true)(2,true,false)(2,false,true)(3,true,false)(3,false,true)" 
     (list_foldl@[string]@[string] string_concat "" strs);
 assertEq@[num] "Trees #2" (runTree@[bool]@[num] (fun (b : bool) : bool {b}) tree123) 2.0;
 

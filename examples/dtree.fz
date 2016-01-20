@@ -6,13 +6,13 @@
 
 /* Also include shortcuts for numtree nodes for convenience */
 
-typedef numtree = tree(num, bool);
+typedef numtree = tree(int, bool);
 
-function ntnode (p : num) (l : tree(num,bool)) (r : tree(num,bool)) : tree(num,bool) {
-  node@[num]@[bool] p l r
+function ntnode (p : int) (l : numtree) (r : numtree) : numtree {
+  node@[int]@[bool] p l r
 }
-leafT = leaf@[num]@[bool] true;
-leafF = leaf@[num]@[bool] false;
+leafT = leaf@[int]@[bool] true;
+leafF = leaf@[int]@[bool] false;
 
 /*
 A database row is a list of bools.  The 0-indexed value is 
@@ -27,17 +27,16 @@ typedef db = boollist bag;
 // times the tree correctly predicts the label for a row.
 // testTree : db -o tree -> Fuzzy num
 function testTree
-  (bagtime : num)
   (t : numtree)
   (db :[] db)
-  : fuzzy num
+  : num
   {
-    let (suc,fail) = bagsplit@[boollist]
+    let (suc,fail) = bagsplitins@[boollist]
         (fun (row : boollist) : bool {
-            let (b,row') = index false 0.0 row;
-            choose = fun (p : num) : bool { let (res,_) = (index@[bool] false p row'); res };
-            runTree@[num]@[bool] choose t == b }) 100.0 db;
-    return (bagsize@[boollist] suc)
+            b = index false 0 row;
+            choose = fun (p : int) : bool { index@[bool] false p row };
+            runTree@[int]@[bool] choose t == b }) db;
+    bagsize@[boollist] suc
   }
 
 
@@ -49,27 +48,26 @@ function chooseBestTree
   (t : numtree)             // the base tree
   (cutoffMod : num -> num)  // the amount of error to beat
   (trees : numtree bag)     // the input trees
-  (bagtime : num)           // the number of steps we use during bagsplit
   (db :[] db)               // the database
   : fuzzy numtree           // new tree
   {
-    test : = fun (t' : numtree) { fun (d :[] db) : fuzzy num {
-                  sample score = testTree bagtime t' d;
-                  if t == t' then { return (cutoffMod score) }
-                             else { return score } } };
+    test : = fun (t' : numtree) { fun (d :[] db) : num {
+                  score = testTree t' d;
+                  if t == t' then { cutoffMod score }
+                             else { score } } };
     expMech@[numtree]@[db] 1.0 test (addtobag@[numtree] t trees) db
   }
 
 
 // A function to return a list of nums [k .. 1]
-function listNums (k : num) : list(num) {
-  if (k <= 0.0) then { nil@[num] }
-                else { cons@[num] k (listNums (k - 1.0)) }
+function listNums (k : int) : list(int) {
+  if (k == 0) then { nil@[int] }
+              else { cons@[int] k (listNums (k .- 1)) }
 }
 
 
 function generateDecisionTreeHelper
-  (k : num)
+  (k : int)
   (evalFun : num -> num -> num -> num -> num) //perhaps the last one should be -o?
   (delta : num)
   (epsilon : num)
@@ -77,9 +75,9 @@ function generateDecisionTreeHelper
   : numtree
   {
     bools = cons@[bool] true (cons@[bool] false nil@[bool]);
-    trees = listtobag@[numtree] (makeTrees@[num]@[bool] (listNums k) bools t);
+    trees = listtobag@[numtree] (makeTrees@[int]@[bool] (listNums k) bools t);
     myfun = fun (x : num) : num { evalFun (bagsize@[numtree] trees) delta epsilon x };
-    rz = runFuzz@[db]@[numtree] (chooseBestTree t myfun trees 100.0);
+    rz = runFuzz@[db]@[numtree] (chooseBestTree t myfun trees);
     case rz of {
       inl(unit) => t
     | inr(t') =>
@@ -94,14 +92,14 @@ function generateDecisionTreeHelper
 // This green zone function calls chooseBestTree until a desired metric 
 // is reached.
 function generateDecisionTree
-  (k : num)
+  (k : int)
   (evalFun : num -> num -> num -> num -> num) //perhaps the last one should be -o?
         //  length trees -> delta -> epsilon -> base tree score -> modified tree score
   : numtree
   { generateDecisionTreeHelper k (evalFun) 0.0 0.0 leafT }
 
 
-function makeDB (k : num) : db {
+function makeDB (k : int) : db {
   row1 : = cons@[bool] true  (cons@[bool] true  (cons@[bool] false nil@[bool]));
   row2 : = cons@[bool] true  (cons@[bool] true  (cons@[bool] true  nil@[bool]));
   row3 : = cons@[bool] false (cons@[bool] false (cons@[bool] false nil@[bool]));
@@ -118,10 +116,10 @@ function myeval (len : num) (delta : num) (eps : num) (bs : num) : num {
 }
 
 function main (arg : ()) : string {
-  t : = generateDecisionTree 2.0 myeval;
-  printTree@[num]@[bool] showNum showBool t
+  t : = generateDecisionTree 2 myeval;
+  showTree@[int]@[bool] showInt showBool t
 
 }
 
-loadDB@[db] (makeDB 2.0) 5.0;
+loadDB@[db] (makeDB 2) 5.0;
 main ()

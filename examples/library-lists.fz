@@ -5,12 +5,12 @@
 function nil forall(A) : list(A) {
     fold[list(A)] (inl@[()]@[(A,list(A))]{()}) }
 
-function cons forall(A) (hd : A) (tl : list(A)) : list(A) {
+function cons forall(A) (hd :[] A) (tl :[] list(A)) : list(A) {
     fold[list(A)] (inr@[()]@[(A,list(A))]{(hd,tl)}) }
 
 // map : (X -> Y) -> list(X) -> list(Y)
-function list_map forall(X, Y) (f : X -> Y) (l : list(X)) : list(Y) {
-  case unfold l of {
+function list_map forall(X, Y) (f : X -> Y) (lm : list(X)) : list(Y) {
+  case unfold lm of {
       inl(x) => nil@[Y]
     | inr(x) => let (h,t) = x;
                 cons@[Y] (f h) (list_map@[X]@[Y] f t)
@@ -18,16 +18,20 @@ function list_map forall(X, Y) (f : X -> Y) (l : list(X)) : list(Y) {
 }
 
 // lmap : (X -o Y) -> list(X) -o list(Y)
-function list_lmap forall (X, Y) (f : X -o Y) (l :[] list(X)) : list(Y) {
-  case unfold l of {
-      inl(x) => nil@[Y]
-    | inr(x) => let (h,t) = x;
-                cons@[Y] (f h) (list_lmap@[X]@[Y] f t)
+function list_lmap forall (X, Y) (s : num) (f : X -o[[s]] Y) (l :[[s]] list(X)) : list(Y) {
+  g = f;
+  function inner (lst :[[s]] list(X)) : list(Y) {
+    case unfold lst of {
+        inl(_) => nil@[Y]
+      | inr(x) => let (h,t) = x;
+                  cons@[Y] (g h) (inner t)
+    }
   }
+  inner l
 }
 
 // fold : (B -o (A ->  B)) -> B -o list(A) -> B
-function list_foldl forall (A, B) (f : (B -o (A -> B))) (ac :[] B) (il : list(A)) : B {
+function list_foldl forall (A, B) (f : (B -o A -o B)) (ac :[] B) (il : list(A)) : B {
   case unfold il of {
      inl(y) => ac
    | inr(y) => let (elem,rest) = y;
@@ -44,9 +48,9 @@ function list_lfoldl forall (A, B) (f : (B -o (A -o B))) (ac :[] B) (il :[] list
   }
 }
 
-// length : list(A) -> num
-function length forall (A) (x :[] list(A)) : num {
-  list_lfoldl@[A]@[num] (fun (y :[] num) { fun (l :[] A ) { y + 1.0 } }) 0.0 x
+// length : list(A) -> int
+function length forall (A) (l :[] list(A)) : int {
+  list_lfoldl@[A]@[int] (fun (n :[] int) { fun (l :[] A ) { n .+ 1 } }) 0 l
 }
 
 // head : A -o list(A) -o A
@@ -78,13 +82,19 @@ function uncons forall (A) (def :[] A) (lst :[] list(A)) : (A, list(A)) {
   }
 }
 
-function performAt forall(A) (n : int) (f : A -> A) (l : list(A)) : list(A) {
-  case unfold l of {
-    inl(_)   => nil@[A]
-  | inr(xxs) => let (x,xs) = xxs;
-                if (n == 0) then { cons@[A] (f x) xs } 
-                            else { cons@[A] x (performAt@[A] (n .- 1) f xs) }
+function performAt forall(A) (n :[] int) (f : A -o A) (l :[] list(A)) : list(A) {
+  g = f;
+  function inner (n :[] (mu X => (() + X))) (l :[] list(A)) : list(A) {
+    case unfold l of {
+      inl(_)   => nil@[A]
+    | inr(xxs) => let (x,xs) = xxs;
+                  case unfold n of {
+                    inl(_)   => cons@[A] (f x) xs
+                  | inr(n')  => cons@[A] x (inner n' xs)
+                  }
+    }
   }
+  inner (intToPeano n) l
 }
 
 
@@ -152,26 +162,38 @@ function remove
     }
   }
 
-// An indexing function that returns the value at the index and returns 
-// the same list but with the indexed value now fixed as the default 
-// value.  If the index is out of bounds, this returns the given 
-// default value.
-// index : A -o num -> list(A) -o (A, list(A))
+// An indexing function for lists.
 function index
   forall(A)
   (def :[] A)
-  (ind : num)
+  (ind : int)
   (lst :[] list(A))
-  : (A, list(A))
-  {
+  : A {
     case (unfold lst) of {
-      inl(unit) => (def, nil@[A])
+      inl(_)    => def
     | inr(xxs)  => let (x,xs) = xxs;
-                   if (ind <= 0.0) then { (x, cons@[A] def xs) }
-                                   else { let (res,rlst) = index@[A] def (ind - 1.0) xs;
-                                         (res, cons@[A] x rlst) }
+                   if (ind == 0) then { x }
+                                 else { index@[A] def (ind .- 1) xs }
     }
-  }
+}
+
+function vectorMap
+  forall(A,B)
+  (s : num)
+  (k : int)
+  (def : A)
+  (f :[[k]] A -o[[s]] B)
+  (l :[[max (s,k)]] list(A))
+  : list(B) {
+    if k <= 0 then {
+      nil@[B]
+    } else {
+      let (x,xs) = uncons@[A] def l;
+      cons@[B] (f x) (vectorMap@[A]@[B] s (k .- 1) def f xs)
+    }
+}
+
+
 
 // // insertion sort
 // function cswp (e :[] (num, num)) : (num, num) {

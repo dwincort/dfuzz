@@ -14,7 +14,7 @@ function node forall(N,L) (n : N) (left : tree(N,L)) (right : tree(N,L)) : tree(
   fold[tree(N,L)] (inr@[L]@[(N, (tree(N,L), tree(N,L)))]{(n,(left,right))})
 }
 
-function printTree 
+function showTree 
   forall(A,B) 
   (pA : A -o string) 
   (pB : B -o string) 
@@ -24,7 +24,7 @@ function printTree
       inl(b) => pB b
     | inr(u) => let (a,ts) = u;
                 let (t1,t2) = ts;
-                "("^(pA a)^","^(printTree@[A]@[B] pA pB t1)^","^(printTree@[A]@[B] pA pB t2)^")"
+                "("^(pA a)^","^(showTree@[A]@[B] pA pB t1)^","^(showTree@[A]@[B] pA pB t2)^")"
     }
 }
 

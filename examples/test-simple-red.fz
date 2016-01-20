@@ -1,0 +1,58 @@
+
+// Testing out partial evaluation and sensitivities with simple terms in them.
+
+
+function test1 (x : num) : string {
+  function fuzzyConstMult (eps : num) (c : num) (n :[[eps * c]] num) : fuzzy num {
+    add_noise eps (scale c n)
+  }
+  rz = runFuzz'@[num]@[num] 3.0 (fuzzyConstMult 1.0 x);
+  case rz of {
+    inl(s) => "error"
+  | inr(z) => if (op_abs (x * 100.0 - z)) < 10.0 then {"succ"} else {"fail"}
+  }
+}
+
+function test2 (x : num) : string {
+  function foo (c : num) (n :[[c]] num) : fuzzy () {
+    x = assert (showNum n) true;
+    return x
+  }
+  rz = runFuzz'@[num]@[()] 3.0 (foo x);
+  case rz of {
+    inl(s) => "error"
+  | inr(unit) => "unit"
+  }
+}
+
+#include "library-lists.fz"
+testLst = cons@[num] 1 (cons@[num] 0.5 (cons@[num] 1 nil@[num]));
+sum = fun (l : list(num)) : num { list_lfoldl@[num]@[num] (fun (x :[] num) { fun (accum :[] num ) { x + accum } }) 0 l };
+
+function innerProdFC
+  (v1 : list(num))
+  (v2 :[] list(num))
+  : num {
+    case unfold v1 of {
+      inl(_) => 0.0
+    | inr(nns) => let (n,ns) = nns;
+                  let (c,cs) = uncons@[num] 0.0 v2;
+                  (scale n c) + (innerProdFC ns cs)
+    }
+}
+
+loadDB@[num] 100.0 3.5;
+assertEq@[string] "Simple SFuzz #1 " (test1 1.0) "succ";
+assertEq@[num]    "Simple SFuzz #2 " (getEpsilon ()) 2.5;
+assertEq@[string] "Simple SFuzz #3 " (test1 2.5) "succ";
+assertEq@[num]    "Simple SFuzz #4 " (getEpsilon ()) 0.0;
+assertEq@[string] "Simple SFuzz #5 " (test1 0.5) "error";
+assertEq@[num]    "Simple SFuzz #6 " (getEpsilon ()) 0.0;
+loadDB@[num] 100.0 8.0;
+assertEq@[string] "Simple SFuzz #7 " (test1 3.1) "error";
+assertEq@[num]    "Simple SFuzz #8 " (getEpsilon ()) 8.0;
+assertEq@[string] "Simple SFuzz #9 " (test2 2.0) "error";
+
+assertEq@[(string+())] "Simple SFuzz #10"
+                  (tyCheckFuzz@[list(num)]@[num] 1.5 (innerProdFC testLst)) (inr@[string]@[()]{()});
+

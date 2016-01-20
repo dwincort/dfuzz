@@ -66,7 +66,6 @@ let reservedWords = [
   ("if", fun i -> Parser.IF i);
   ("then", fun i -> Parser.THEN i);
   ("else", fun i -> Parser.ELSE i);
-  ("print", fun i -> Parser.PRINT i);
   ("bool", fun i -> Parser.BOOL i);
   ("num", fun i -> Parser.NUM i);
   ("string", fun i -> Parser.STRING i);

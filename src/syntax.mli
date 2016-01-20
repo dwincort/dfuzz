@@ -21,6 +21,10 @@ val var_from_binder : int -> binder_info -> var_info
 
 (* Shift all the open indexes by n *)
 val ty_shiftTy  : int -> int -> ty -> ty
+(* val tm_shiftTm  : int -> int -> term -> term *)
+
+(* Apply a function to all term variables *)
+val ty_mapTm : (info -> var_info -> term) -> ty -> ty
 
 (* Capture avoiding sub, the term must be dependent on the number of
    binders under it is replaced *)

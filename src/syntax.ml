@@ -91,8 +91,8 @@ let rec tm_map
   | TmPrim(i, p) ->
     TmPrim(i, p)
     
-  | TmPrimFun(i, s,             ty,                       tmlst)  ->
-    TmPrimFun(i, s, fty ntm nty ty, List.map (tf ntm nty) tmlst)
+  | TmPrimFun(i, s,             ty,                                                            tmtylst)  ->
+    TmPrimFun(i, s, fty ntm nty ty, List.map (fun (tm, ty) -> (tf ntm nty tm, fty ntm nty ty)) tmtylst)
   
   | TmBag(i,             ty,                       tmlst) ->
     TmBag(i, fty ntm nty ty, List.map (tf ntm nty) tmlst)
@@ -126,8 +126,8 @@ let rec tm_map
   | TmLet(i, bi,             si,            tm,                tm_i)  ->
     TmLet(i, bi, fsi ntm nty si, tf ntm nty tm, tf (ntm+1) nty tm_i)
   
-  | TmLetRec(i, bi,             ty,                tm,                tm_i)   ->
-    TmLetRec(i, bi, fty ntm nty ty, tf (ntm+1) nty tm, tf (ntm+1) nty tm_i)
+  | TmLetRec(i, bi,                 ty,                tm,                tm_i)   ->
+    TmLetRec(i, bi, fty (ntm+1) nty ty, tf (ntm+1) nty tm, tf (ntm+1) nty tm_i)
   
   | TmSample(i, bi,            tm,                tm_i) ->
     TmSample(i, bi, tf ntm nty tm, tf (ntm+1) nty tm_i)
@@ -187,10 +187,21 @@ let rec tm_shiftTm (o : int) (n : int) (tm : term) : term =
 
 and ty_shiftTm (o : int) (n : int) (ty : ty) : ty = 
   let fv _ v = TyVar v  in
-  ty_map o fv (si_shiftTm n) ty
+  ty_map o fv (fun _ -> si_shiftTm o n) ty
 
 and si_shiftTm (o : int) (n : int) (si : si) : si =
   si_map (tm_shiftTm o n) si
+
+
+let rec tm_mapTm (f : info -> var_info -> term) (tm : term) : term = 
+  let fv _ _ = f in
+  let fty _ _ ty = ty_mapTm f ty in
+  let fsi _ _ si = si_mapTm f si in
+  tm_map 0 0 fv fty fsi tm
+and ty_mapTm f ty = 
+  let fv _ v = TyVar v in
+  ty_map 0 fv (fun _ -> si_mapTm f) ty
+and si_mapTm f si = si_map (tm_mapTm f) si
 
 
 
@@ -247,12 +258,6 @@ and si_substTm (t : term) (x : int) (kty : int) (si : si) : si =
   si_map (tm_substTm t x kty) si
 
 
-(* (* A special substitution just for type definitions. *)
-let typedef_subst t x tm = 
-  let tsub  k = ty_substTy (ty_shiftTy 0 (k-1) t) (x+k) in
-  let sisub k = si_shiftTy k (-1)  in
-  tm_mapTy 0 tsub sisub tm
-*)
 
 
 (************************************************************************)
@@ -264,8 +269,8 @@ let rec tmEq (t1 : term) (t2 : term) : bool =
     TmVar(_,v2) -> v1 = v2
   | TmPrim(_,p1), 
     TmPrim(_,p2) -> p1 = p2
-  | TmPrimFun(_,_,ty1,tml1), 
-    TmPrimFun(_,_,ty2,tml2) -> false
+  | TmPrimFun(_,_,ty1,tmtyl1), 
+    TmPrimFun(_,_,ty2,tmtyl2) -> false
   | TmBag(_, ty1, tml1), 
     TmBag(_, ty2, tml2) -> false
   | TmPair(_, t1a, t1b),

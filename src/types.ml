@@ -106,7 +106,7 @@ and  term =
      to make the type (info * string * ty * term list * primfun) and have the string be entirely for 
      debug purposes. This will involve passing the primfun list to the parser instead 
      of the interpreter and having the parser look up the strings directly. *)
-  | TmPrimFun   of info * string * ty * term list
+  | TmPrimFun   of info * string * ty * (term * ty) list
   
   (* Note that the type in the TmBag is the type of the whole bag, NOT just the type of the contents. *)
   | TmBag       of info * ty * term list

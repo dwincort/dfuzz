@@ -74,8 +74,8 @@ module FileInfo = struct
 
   let file_ignored_list = []
 (*  ["./lib/primitives.fz";
-     "examplese/fuzz/tutorial/library-lists.fz";
-     "examplese/fuzz/tutorial/library-bags.fz";
+     "examples/sfuzz/library-lists.fz";
+     "examples/sfuzz/library-bags.fz";
     ] *)
 
   let file_ignored fi = match fi with

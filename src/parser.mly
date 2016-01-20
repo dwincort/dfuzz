@@ -73,9 +73,16 @@ let rec list_to_term l body = match l with
 let from_args_to_term qf arg_list body =
   qf_to_term qf (list_to_term arg_list body)
 
+let mkNewVarsInType ty ctx = 
+  let f i v = TmVar(i, existing_var i v.v_name ctx) in
+  ty_mapTm f ty
+
+(* When we're making this list for primFuns, the type may have terms in it (e.g. 
+   SiTerms).  They must be appropriately indexed, so we remake them with the 
+   current (potentially extended) context.  We do this with mkNewVarsInType. *)
 let rec args_to_args_list fi arg_list ctx = match arg_list with
   | []      -> []
-  | (ty, si, n, i) :: arg_list' -> TmVar(fi, existing_var fi n ctx) :: args_to_args_list fi arg_list' ctx
+  | (ty, si, n, i) :: arg_list' -> (TmVar(fi, existing_var fi n ctx), mkNewVarsInType ty ctx) :: args_to_args_list fi arg_list' ctx
 
 let mk_infix ctx info op t1 t2 =
   match Ctx.lookup_var op ctx with
@@ -165,7 +172,6 @@ let rec remove_quantifiers ty = match ty with
 %token <Support.FileInfo.info> IF
 %token <Support.FileInfo.info> THEN
 %token <Support.FileInfo.info> ELSE
-%token <Support.FileInfo.info> PRINT
 %token <Support.FileInfo.info> EOF
 %token <Support.FileInfo.info> BOOL
 %token <Support.FileInfo.info> NUM
@@ -177,6 +183,8 @@ let rec remove_quantifiers ty = match ty with
 %token <Support.FileInfo.info> CLIPPED
 %token <Support.FileInfo.info> INT
 %token <Support.FileInfo.info> DOT
+%token <Support.FileInfo.info> DOTMUL
+%token <Support.FileInfo.info> DOTDIV
 %token <Support.FileInfo.info> ZERO
 %token <Support.FileInfo.info> SUCC
 
