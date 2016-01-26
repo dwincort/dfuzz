@@ -284,6 +284,8 @@ and pp_term ppf t =
 
   | TmLetRec(_, n, r_ty, tm1, tm2) ->
     fprintf ppf "@[<v>@[<hov>rec %a : @[%a@] =@;<1 1>@[%a@]@];@,@[%a@]@]" pp_binfo n pp_type r_ty pp_term tm1 pp_term tm2
+  
+  | TmInfCheck(_, tm) -> fprintf ppf "%a" pp_term tm
 
   | TmSample(_, n, tm1, tm2) ->
     fprintf ppf "@[<v>@[<hov>sample %a@ =@;<1 1>@[%a@]@];@,@[%a@]@]" pp_binfo n pp_term tm1 pp_term tm2

@@ -359,6 +359,11 @@ module TypeSub = struct
     | TyPrim1 (Prim1Fuzzy, ty) -> return ty
     | _                        -> fail i @@ WrongShape (ty, "fuzzy")
 
+  let check_bag_shape i ty =
+    match ty with
+    | TyPrim1 (Prim1Bag, ty)   -> return ty
+    | _                        -> fail i @@ WrongShape (ty, "bag")
+
   let check_tensor_shape i ty =
     match ty with
     | TyTensor(ty1, ty2) -> return (ty1, ty2)
@@ -437,9 +442,10 @@ let rec type_of (t : term) : (ty * si list) checker  =
     return (ty, zeros len)
   
   | TmBag(i, ty, tmlst) -> 
+    check_bag_shape i ty >>= fun ity ->
     mapM (fun tm -> 
       type_of tm >>= fun (aty, _) ->
-      check_type_sub i aty ty) tmlst >>
+      check_type_sub i aty ity) tmlst >>
     get_ctx_length >>= fun len ->
     return (ty, zeros len)
     
@@ -496,6 +502,8 @@ let rec type_of (t : term) : (ty * si list) checker  =
 
     ty_debug i "### Type of binder %a is %a" Print.pp_binfo x Print.pp_type ty_x;
     return (ty_e, add_sens sis_e (scale_sens (si_mult si_infty si_x') sis_x))  (* TODO: This is an instance of infinity times (potentially) zero *)
+
+  | TmInfCheck(i, tm) -> type_of tm
 
   (* sample b_x = tm_x; e *)
   | TmSample(i, b_x, tm_x, e)                              ->

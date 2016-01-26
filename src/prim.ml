@@ -56,6 +56,13 @@ module Creation = struct
                             ex2 name t2 >>= fun v2 ->
                             return (v1, v2)
     | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a pair but found %a" name pp_term tp
+  let rec exList exA name tl = match tl with
+    | TmFold(_i, _, TmLeft(_,tm,_)) -> return []
+    | TmFold(_i, _, TmRight(_,TmPair(_, tx, txs),_)) ->
+        exA name tx >>= fun vx ->
+        exList exA name txs >>= fun vxs ->
+        return (vx :: vxs)
+    | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a list but found %a" name pp_term tl
   let exFun _name t = return t (* Theoretically, we could check that it's actually a function, but we don't need to *)
   let exAny _name t = return t
   
@@ -332,6 +339,23 @@ let rec bagfoldlFun
     | b::bs -> Interpreter.interp (TmApp(di, TmApp(di, f, a), b)) >>= fun x ->
                bagfoldlFun f x bs
 
+let bagPairOperateFun
+  (tyo : ty)
+  (f : term)
+  (g : term)
+  (bag : term list)
+  : (term * term) interpreter = 
+    mapM (exPair exAny exAny "bagPairOperate") bag >>= fun bagp ->
+    let (ba, bb) = List.split bagp in
+    (match tyo with
+      | TyTensor(ta,tb) -> return (ta,tb)
+      | _               -> fail "**Primitive** bagPairOperate found a weird type")
+      >>= fun (ta,tb) ->
+    Interpreter.interp (TmApp(di, f, mkBag di (ta, ba))) >>= fun outA ->
+    Interpreter.interp (TmApp(di, g, mkBag di (tb, bb))) >>= fun outB ->
+    return (outA, outB)
+    
+
 let bagmapFun 
   (ty : ty)
   (f : term)
@@ -371,7 +395,7 @@ let expMechFun
     mapM (fun r -> Interpreter.interp (TmApp(di, TmApp(di, quality, r), db)) 
             >>= exNum "expMech"
             >>= fun q -> return (r, q +. Math.lap (2.0 /. eps))) rbag >>= fun problist ->
-(*    Support.Error.message 3 Support.Options.Interpreter Support.FileInfo.dummyinfo 
+(*    Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
       "--- expMech: Probabilities are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) problist));*)
     let (res, _) = List.fold_left 
             (fun best r -> if snd r > snd best then r else best)
@@ -389,6 +413,8 @@ let expMechOnePassFun
     mapM (exPair exAny exNum "expMechOnePass") resbag >>= fun rnumlist ->
     let problist = List.map (fun (r,q) -> (r, q +. Math.lap (2.0 /. eps))) rnumlist in
 (*    Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
+      "--- expMech: Scores are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) rnumlist));
+    Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
       "--- expMech: Probabilities are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) problist));*)
     let (res, i) = List.fold_left 
             (fun best r -> if snd r > snd best then r else best)
@@ -410,13 +436,13 @@ let fileLines (filename : string) =
     List.rev !lines
 
 
-let typeToMaker (ty : ty) : (string -> term) interpreter = match ty with
-  | TyPrim PrimNum  -> return (fun s -> mkNum di (float_of_string s))
-  | TyPrim PrimInt  -> return (fun s -> mkInt di (int_of_string s))
-  | TyPrim PrimUnit -> return (mkUnit di)
-  | TyPrim PrimBool -> return (fun s -> mkBool di (bool_of_string s))
-  | TyPrim PrimString   -> return (mkString di)
-  | TyPrim PrimClipped  -> return (fun s -> mkClipped di (float_of_string s))
+let typeToMaker (i : info) (ty : ty) : (string -> term) interpreter = match ty with
+  | TyPrim PrimNum  -> return (fun s -> mkNum i (float_of_string s))
+  | TyPrim PrimInt  -> return (fun s -> mkInt i (int_of_string s))
+  | TyPrim PrimUnit -> return (mkUnit i)
+  | TyPrim PrimBool -> return (fun s -> mkBool i (bool_of_string s))
+  | TyPrim PrimString   -> return (mkString i)
+  | TyPrim PrimClipped  -> return (fun s -> mkClipped i (float_of_string s))
   | _ -> fail @@ pp_to_string "" "**Primitive** unsupported read type: %a." pp_type ty
 
 (* Here are the *fromFile primitives. *)
@@ -429,7 +455,7 @@ let bagFromFileFun
       | TyPrim1 (Prim1Bag, subty)   -> return subty
       | _   -> fail @@ pp_to_string "" "**Primitive** bagFromFile found a weird type %a." pp_type oty
     ) >>= fun subty ->
-    typeToMaker subty >>= fun lineFun ->
+    typeToMaker di subty >>= fun lineFun ->
     return (oty, List.map lineFun lines)
 
 let listFromFileFun
@@ -441,10 +467,10 @@ let listFromFileFun
       | TyMu (_, TyUnion (TyPrim PrimUnit, TyTensor (subty, TyVar _))) -> return subty
       | _   -> fail @@ pp_to_string "" "**Primitive** listFromFile found a weird type %a." pp_type oty
     ) >>= fun subty ->
-    typeToMaker subty >>= fun lineFun ->
+    typeToMaker di subty >>= fun lineFun ->
     return (List.fold_right (fun v fzlst -> TmFold (di, oty, TmRight (di, TmPair (di, v, fzlst), TyPrim PrimUnit)))
                             (List.map lineFun lines) 
-                            (TmFold (di, oty, TmLeft (di, TmPrim (di, PrimTUnit), subty))))
+                            (TmFold (di, oty, TmLeft (di, TmPrim (di, PrimTUnit), TyTensor(subty, oty)))))
 
 let listbagFromFileFun
   (oty : ty)
@@ -455,7 +481,7 @@ let listbagFromFileFun
       | TyPrim1 (Prim1Bag, TyMu (_, TyUnion (TyPrim PrimUnit, TyTensor (subty, TyVar _)))) -> return subty
       | _   -> fail @@ pp_to_string "" "**Primitive** baglistFromFile found a weird type %a." pp_type oty
     ) >>= fun subty ->
-    typeToMaker subty >>= fun wordFun ->
+    typeToMaker di subty >>= fun wordFun ->
     let lineFun line = List.fold_right (fun v fzlst -> TmFold (di, oty, TmRight (di, TmPair (di, v, fzlst), TyPrim PrimUnit)))
                             (List.map wordFun (Str.split (Str.regexp "[ \t]+") line))
                             (TmFold (di, oty, TmLeft (di, TmPrim (di, PrimTUnit), subty)))
@@ -544,20 +570,17 @@ let prim_list : (string * primfun) list = [
   (fun ty x xs -> return (ty, x::xs)));
 ("bagjoin", fun_of_2args_with_type_i "bagjoin" exBag exBag mkBag
   (fun ty b1 b2 -> return (ty, List.append b1 b2)));
-("bagsize", fun_of_1arg "bagsize" exBag mkNum (fun l -> float_of_int (List.length l)));
+("bagsize", fun_of_1arg "bagsize" exBag mkInt ( List.length ));
 
-("bagfoldl", fun_of_4args_i "bagfoldl" exNum exAny exAny exBag mkAny (fun _ -> bagfoldlFun));
+(* ("bagfoldl", fun_of_4args_i "bagfoldl" exNum exAny exAny exBag mkAny (fun _ -> bagfoldlFun)); *)
 
-("bagmapins", fun_of_2args_with_type_i "bagmapins" exFun exBag mkBag bagmapFun);
-("bagmap", fun_of_3args_with_type_i "bagmap" exFun exNum exBag mkBag 
-  (fun ty f _timeout b -> bagmapFun ty f b));
+("bagmap", fun_of_2args_with_type_i "bagmap" exFun exBag mkBag bagmapFun);
 
 ("bagsum", fun_of_1arg_i "bagsum" exBag mkNum 
   (fun l -> mapM (exNum "bagsum") l >>= fun l' -> return (List.fold_left (+.) 0.0 l')));
+("bagPairOperate", fun_of_3args_with_type_i "bagPairOperate" exFun exFun exBag (mkPair mkAny mkAny) bagPairOperateFun);
 
-("bagsplitins", fun_of_2args_with_type_i "bagsplitins" exFun exBag (mkPair mkBag mkBag) bagsplitFun);
-("bagsplit", fun_of_3args_with_type_i "bagsplit" exFun exNum exBag (mkPair mkBag mkBag)
-  (fun ty f _timeout b -> bagsplitFun ty f b));
+("bagsplit", fun_of_2args_with_type_i "bagsplit" exFun exBag (mkPair mkBag mkBag) bagsplitFun);
 
 
 (* Differential Privacy mechanisms *)

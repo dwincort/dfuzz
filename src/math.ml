@@ -7,5 +7,8 @@
    b is X = mu - b sign(U) ln(1-2|U|) where -1/2<=U<1/2
 *)
 let lap sigma =
-  let s = 2 * (Random.int 2) - 1 in
-    float_of_int s *. sigma *. log(Random.float 1.0)
+  let u = (Random.float 1.0) -. 0.5 in
+  sigma *. (copysign 1.0 u) *. log(1.0 -. 2.0 *. abs_float u)
+
+(*  let s = 2 * (Random.int 2) - 1 in
+    float_of_int s *. sigma *. log(Random.float 1.0)*)

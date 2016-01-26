@@ -98,6 +98,21 @@ function performAt forall(A) (n :[] int) (f : A -o A) (l :[] list(A)) : list(A) 
 }
 
 
+function zipWithS forall(A,B,C) (sens : num) (f : A -o[[sens]] B -o[[sens]] C) (l1 :[[sens]] list(A)) (l2 :[[sens]] list(B)) : list(C) {
+  g = f;
+  function inner (l1 :[[sens]] list(A)) (l2 :[[sens]] list(B)) : list(C) {
+    case unfold l1 of {
+      inl(x) => nil@[C]
+    | inr(x) => case unfold l2 of {
+                  inl(y) => nil@[C]
+                | inr(y) => let (xh,xt) = x; let (yh,yt) = y;
+                            cons@[C] (f xh yh) (inner xt yt)
+                }
+      }
+  }
+  inner l1 l2
+}
+
 function zipWith forall(A,B,C) (f : A -o B -o C) (l1 :[] list(A)) (l2 :[] list(B)) : list(C) {
   case unfold l1 of {
     inl(x) => nil@[C]

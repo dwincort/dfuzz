@@ -130,6 +130,7 @@ and  term =
   (* Bindings *)
   | TmLet      of info * binder_info * si * term * term
   | TmLetRec   of info * binder_info * ty * term * term
+  | TmInfCheck of info * term
   | TmSample   of info * binder_info * term * term
 
   (* Type Abstraction and Applicacion *)
@@ -149,10 +150,11 @@ and  primfun = PrimFun of (ty * term list -> term interpreter)
 (* Interpreter monad *)
 (* TODO: The primfun list should be handled by the parser *)
 and  'a interpreter = 
-    (((term * epsilon * epsilon list) option)   (* The database, its budget, and the list of red zone computation sensitivities performed so far *)
+    (((term * epsilon * epsilon list) option)   (* The database, its budget, and the list of red zone computation sensitivities performed so far. *)
     * bool                      (* Represents whether we are in partial evaluation mode or not. *)
+    * (term list)               (* Represents the recursive functions we have already expanded (to prevent infinite loops. *)
     * (string * primfun) list)  (* The primfun map is the initial set of primitive function implementations. *)
-   -> ((term * epsilon * epsilon list) option   (* The database, its budget, and the list of red zone computation sensitivities as output *)
+   -> ((term * epsilon * epsilon list) option   (* The database, its budget, and the list of red zone computation sensitivities as output. *)
     * ('a, string) result)      (* the output is either an Ok value or an error with a string. *)
 
 (* Contexts for parsing and type checking *)

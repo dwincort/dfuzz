@@ -48,6 +48,7 @@ primitive op_isub (op1 :[] int ) (op2 :[] int ) : int { "_isub" }
 primitive op_imul (op1 : int ) (op2 : int ) : int { "_imul" }
 primitive op_idiv (op1 : int ) (op2 : int ) : int { "_idiv" }
 primitive intToPeano (n :[] int) : (mu X => (() + X)) { "intToPeano" }
+intToFloat = fun (x :[] num) : num { x };
 
 // Clip type creation
 primitive clip (n :[] num) : clipped                    { "clip" }
@@ -109,7 +110,7 @@ primitive runFuzz
 primitive runFuzz'
   forall(DB,A)
   (sens : num)
-  (foo : DB -o fuzzy A)
+  (foo : DB -o[[sens]] fuzzy A)
   : (string + A) { "runRedZoneS" }
 
 primitive getDelta   (_ : ()) : delta   { "getDelta"   }
@@ -126,16 +127,16 @@ primitive add_noise
 primitive expMech
   forall(A,DB)
   (eps : num)
-  (foo : A -> DB -o num) 
+  (foo : A -> DB -o[[eps]] num) 
   (rs : A bag) 
-  (db :[[eps]] DB) 
+  (db :[] DB) 
   : fuzzy A { "expMech" }
 
 primitive expMechOnePass
   forall(A,DB)
   (eps : num)
   (foo : DB -o[[eps]] ((A,num) bag)) 
-  (db :[[eps]] DB) 
+  (db :[] DB) 
   : fuzzy A { "expMechOnePass" }
 
 ////////////////////////////////////////////////////////////////////////

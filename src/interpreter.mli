@@ -27,6 +27,10 @@ module InterpMonad : sig
   
   val isInPartial : bool interpreter
   
+  val withRecTerm : term -> 'a interpreter -> 'a interpreter
+  
+  val seenRecTerm : term -> bool interpreter
+  
   val attemptRedZone : epsilon -> bool interpreter
   
   val getDB : term interpreter

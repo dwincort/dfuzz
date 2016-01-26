@@ -58,77 +58,72 @@ primitive bagFromFile forall(DATA) (file : string) : DATA bag { "bagFromFile" }
 primitive listbagFromFile forall(DATA) (file : string) : list(DATA) bag { "listbagFromFile" }
 
 /*
-  bagsplit : (A -> bool) -> num -> A bag -o ( A bag x A bag ) 
+  bagsplit : (A -> bool) -> A bag -o ( A bag x A bag ) 
 
   Splits a bag in two bags: one containing the elements satisfying the
   test (the first argument), the other the elements that don't pass
-  the test. The second argument (of type 'num') is the number ot steps
-  we allow the function run.
+  the test.
 */
 primitive bagsplit
    forall(A)
    (pred : A -> bool)
-   (n    : num)
    (b    :[] A bag) : ( A bag,  A bag ) { "bagsplit" }
 
 /*
-  bagsplitins : (A -> bool) -> num -> A bag -o ( A bag x A bag ) 
+  bagfoldl : num -> ((A, B) -o A) -> A -o B bag -o A
 
-  This is an "ins"ensitive version of bagsplit, and as such, 
-  it does not require a number-of-steps argument.
+  Folds the bag.  NOTE: This function is leaky.
 */
-primitive bagsplitins
-   forall(A)
-   (pred : A -> bool)
-   (b    :[] A bag) : ( A bag,  A bag ) { "bagsplitins" }
+// primitive bagfoldl forall (A,B) 
+//   (s : num)
+//   (f : B -o A -> B)
+//   (a : B)
+//   (b :[[s]] A bag) : B { "bagfoldl" }
 
 /*
-  bagfoldl : ((A, B) -o A) -> num -> A -o B bag -o A
+  bagmap : (A -> B) -> A bag -o B bag
 
-  Folds the bag.  Requres a timeout argument which is the number of steps to run.
+  This is the straightforward adaptation of the classical map function
+  on lists to the case of bags.
 */
-primitive bagfoldl forall (A,B) 
-  (s : num)
-  (f : B -o A -o[[s]] B)
-  (a : B)
-  (b :[[s]] A bag) : B { "bagfoldl" }
+primitive bagmap forall (A,B) (f : A -> B) (a :[] A bag) : B bag { "bagmap" }
+
 
 /*
   bagsize : A bag -o num
   
   Given a bag it returns the number of elements in it.
 */
-//primitive bagsize forall(A) (b :[] A bag) : num { "bagsize" }
-function bagsize forall(A) (b :[] A bag) : int {
-  bagfoldl@[A]@[int] 1 (fun (acc : int) {fun (_ : A) : int {1 .+ acc}}) 0 b
-}
+primitive bagsize forall(A) (b :[] A bag) : int { "bagsize" }
+// function bagsize forall(A) (b :[] A bag) : int {
+//   bagfoldl@[A]@[int] 1 (fun (acc :[] int) {fun (_ : A) : int {1 .+ acc}}) 0 b
+// }
 
 /*
   bagsum : (clipped bag) -o num
 
   Returns the sum of the elements of the bag.
 */
-//primitive bagsum (b :[] clipped bag) : num { "bagsum" }
-function bagsum (b :[] clipped bag) : num {
-  bagfoldl@[clipped]@[num] 1 op_add 0 b
+primitive bagsum (b :[] clipped bag) : num { "bagsum" }
+// function bagsum (b :[] clipped bag) : num {
+//   bagfoldl@[clipped]@[num] 1 op_add 0 b
+// }
+
+primitive bagPairOperate forall(A,B,C,D)
+  (f : (A bag) -o C)
+  (g : (B bag) -o D)
+  (b :[] (A,B) bag) : (C,D) { "bagPairOperate" }
+
+function bagsumL (n : int) (b :[] (list(clipped)) bag) : list(num) {
+  if n <= 0 then {
+    nil@[num]
+  } else {
+    let (c,d) = bagPairOperate@[clipped]@[list(clipped)]@[num]@[list(num)] 
+                    bagsum (bagsumL (n .- 1)) 
+                    (bagmap@[list(clipped)]@[(clipped, list(clipped))] (uncons@[clipped] (clip 0.0)) b);
+    cons@[num] c d
+  }
 }
-
-/*
-  bagmap : (A -> B) -> num -> A bag -o B bag
-
-  This is the straightforward adaptation of the classical map function
-  on lists to the case of bags.  The second argument (of type 'num')
-  is the number ot steps we allow the function to run.
-*/
-primitive bagmap forall (A,B) (f : A -> B) (timeout : num) (a :[] A bag) : B bag { "bagmap" }
-
-/*
-  bagmapins : (A -> B) -> A bag -> B bag
-
-  This is an "ins"ensitive version of bagmap, and as such, 
-  it does not require a number-of-steps argument.
-*/
-primitive bagmapins forall (A,B) (f : A -> B) (a :[] A bag) : B bag { "bagmapins" }
 
 //////////////////////////////////////////////////////////////////////
 // Utilities
@@ -147,30 +142,30 @@ function listtobag forall(A) (lst :[] list(A)) : A bag {
 }
 
 /*
-  bagfilter : (A -> Bool) -> num -> A bag -o A bag
+  bagfilter : (A -> Bool) -> A bag -o A bag
 
   Returns a bag containing the elements of the input bag passing the
   test (the first argument).
 */
-function bagfilter forall (A) (test: A -> bool) (timeout : num) (b:[] A bag) : A bag {
-    let (yes, no) = bagsplit@[A] test timeout b;
+function bagfilter forall (A) (test: A -> bool) (b:[] A bag) : A bag {
+    let (yes, no) = bagsplit@[A] test b;
     yes
 }
 
 /*
-   bagpartition : list(K) -> num -> (K,A) bag -o list ((K,A) bag)
+   bagpartition : list(K) -> (K,A) bag -o list ((K,A) bag)
 
    bagpartition with counter
 */
-function bagpartition forall (A, K) (klist: list(K)) (timeout : num) (db :[] (K, A) bag) : list((K,A) bag) {
+function bagpartition forall (A, K) (klist: list(K)) (db :[] (K, A) bag) : list((K,A) bag) {
     case unfold klist of {
       inl(x) => nil@[(K,A) bag]
     | inr(x) => let (k,ks) = x;
                 let (db1, db2) = bagsplit@[(K,A)] 
                       (fun (y :[] (K,A)) : bool {
                         let (y1,y2) = y;
-                        y1 == k}) timeout db;
-                cons@[(K,A) bag] db1 (bagpartition@[A]@[K] ks timeout db2)
+                        y1 == k}) db;
+                cons@[(K,A) bag] db1 (bagpartition@[A]@[K] ks db2)
     }
 }
 

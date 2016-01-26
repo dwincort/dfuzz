@@ -25,15 +25,15 @@ typedef db = boollist bag;
 
 // testTree takes a set of rows and a tree and returns the number of 
 // times the tree correctly predicts the label for a row.
-// testTree : db -o tree -> Fuzzy num
+// testTree : tree -> db -o int
 function testTree
   (t : numtree)
   (db :[] db)
-  : num
+  : int
   {
-    let (suc,fail) = bagsplitins@[boollist]
+    let (suc,fail) = bagsplit@[boollist]
         (fun (row : boollist) : bool {
-            b = index false 0 row;
+            b = index@[bool] false 0 row;
             choose = fun (p : int) : bool { index@[bool] false p row };
             runTree@[int]@[bool] choose t == b }) db;
     bagsize@[boollist] suc
@@ -53,8 +53,9 @@ function chooseBestTree
   {
     test : = fun (t' : numtree) { fun (d :[] db) : num {
                   score = testTree t' d;
-                  if t == t' then { cutoffMod score }
-                             else { score } } };
+                  intToFloat score } }; //FIXME I can't do the following if statement because it's infinitely sensitive.  How do I get the cutoffMod applied anyway?
+//                   if t == t' then { cutoffMod score }
+//                              else { intToFloat score } } };
     expMech@[numtree]@[db] 1.0 test (addtobag@[numtree] t trees) db
   }
 
@@ -68,7 +69,7 @@ function listNums (k : int) : list(int) {
 
 function generateDecisionTreeHelper
   (k : int)
-  (evalFun : num -> num -> num -> num -> num) //perhaps the last one should be -o?
+  (evalFun : int -> num -> num -> num -> num) //perhaps the last one should be -o?
   (delta : num)
   (epsilon : num)
   (t : numtree)
@@ -79,7 +80,7 @@ function generateDecisionTreeHelper
     myfun = fun (x : num) : num { evalFun (bagsize@[numtree] trees) delta epsilon x };
     rz = runFuzz@[db]@[numtree] (chooseBestTree t myfun trees);
     case rz of {
-      inl(unit) => t
+      inl(s) => print s; t
     | inr(t') =>
         d = getDelta ();
         e = getEpsilon ();
@@ -93,7 +94,7 @@ function generateDecisionTreeHelper
 // is reached.
 function generateDecisionTree
   (k : int)
-  (evalFun : num -> num -> num -> num -> num) //perhaps the last one should be -o?
+  (evalFun : int -> num -> num -> num -> num) //perhaps the last one should be -o?
         //  length trees -> delta -> epsilon -> base tree score -> modified tree score
   : numtree
   { generateDecisionTreeHelper k (evalFun) 0.0 0.0 leafT }
@@ -111,7 +112,7 @@ function makeDB (k : int) : db {
           (emptybag@[boollist]))))
 }
 
-function myeval (len : num) (delta : num) (eps : num) (bs : num) : num {
+function myeval (len : int) (delta : num) (eps : num) (bs : num) : num {
   bs
 }
 

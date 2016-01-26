@@ -44,46 +44,48 @@ let rec si_map
   (ftm : term -> term)  (* The action to take on embedded terms *)
   (si : si)             (* The sensitivity to map over *)
   : si =
+    let fsi si = si_map ftm si in
     match si with
     | SiInfty         -> si
     | SiConst c       -> si
     | SiTerm  t       -> SiTerm (ftm t)
-    | SiAdd  (s1, s2) -> SiAdd  (si_map ftm s1, si_map ftm s2)
-    | SiMult (s1, s2) -> SiMult (si_map ftm s1, si_map ftm s2)
-    | SiLub  (s1, s2) -> SiLub  (si_map ftm s1, si_map ftm s2)
+    | SiAdd  (s1, s2) -> SiAdd  (fsi s1, fsi s2)
+    | SiMult (s1, s2) -> SiMult (fsi s1, fsi s2)
+    | SiLub  (s1, s2) -> SiLub  (fsi s1, fsi s2)
 
 (* Map over types *)
 let rec ty_map
-  (n   : int)                   (* The number of binders deep we are *)
-  (fv  : int -> var_info -> ty) (* The action on type variables *)
-  (fsi : int -> si -> si)       (* The action on sesitivities *)
+  (ntm : int)                   (* The number of regular variable binders deep we are *)
+  (nty : int)                   (* The number of type variable binders deep we are *)
+  (fv  : int -> int -> var_info -> ty) (* The action on type variables *)
+  (fsi : int -> int -> si -> si)       (* The action on sesitivities *)
   (ty  : ty)                    (* The type to map over *)
   : ty = 
-    let tmap n ty = ty_map n fv fsi ty in
+    let fty ntm nty ty = ty_map ntm nty fv fsi ty in
     match ty with
-      TyVar v                 -> fv n v
+      TyVar v                 -> fv ntm nty v
     | TyPrim tp               -> TyPrim tp
-    | TyPrim1 (tp, ty)        -> TyPrim1 (tp, tmap n ty)
+    | TyPrim1 (tp, ty)        -> TyPrim1 (tp, fty ntm nty ty)
     (* ADT *)
-    | TyUnion(ty1, ty2)       -> TyUnion    (tmap n ty1, tmap n ty2)
-    | TyTensor(ty1, ty2)      -> TyTensor   (tmap n ty1, tmap n ty2)
-    | TyAmpersand(ty1, ty2)   -> TyAmpersand(tmap n ty1, tmap n ty2)
+    | TyUnion(ty1, ty2)       -> TyUnion    (fty ntm nty ty1, fty ntm nty ty2)
+    | TyTensor(ty1, ty2)      -> TyTensor   (fty ntm nty ty1, fty ntm nty ty2)
+    | TyAmpersand(ty1, ty2)   -> TyAmpersand(fty ntm nty ty1, fty ntm nty ty2)
     (* *)
-    | TyLollipop(ty1, s, ty2) -> TyLollipop(tmap n ty1, fsi n s, tmap n ty2)
+    | TyLollipop(ty1, s, ty2) -> TyLollipop(fty ntm nty ty1, fsi ntm nty s, fty (ntm+1) nty ty2)
     
-    | TyMu(b, ty)             -> TyMu(b, tmap (n+1) ty)
+    | TyMu(b, ty)             -> TyMu(b, fty ntm (nty+1) ty)
     (* *)
-    | TyForall(b, ty)         -> TyForall(b, tmap (n+1) ty)
+    | TyForall(b, ty)         -> TyForall(b, fty ntm (nty+1) ty)
 
 let rec tm_map
   (ntm : int)               (* The number of regular variable binders deep we are *)
   (nty : int)               (* The number of type variable binders deep we are *)
-  (fv  : int -> int -> info -> var_info -> term) (* The action on regular variables (with the ntm value) *)
+  (fv  : int -> int -> info -> var_info -> term) (* The action on regular variables *)
   (fty : int -> int -> ty -> ty)   (* Action to take on types *)
   (fsi : int -> int -> si -> si)   (* Action to take on sensitivites *)
   (tm : term)               (* The term to map over *)
   : term = 
-  let tf ntm nty tm = tm_map ntm nty fv fty fsi tm in
+  let ftm ntm nty tm = tm_map ntm nty fv fty fsi tm in
   match tm with
   | TmVar (i, v)                    ->
     fv ntm nty i v
@@ -91,68 +93,70 @@ let rec tm_map
   | TmPrim(i, p) ->
     TmPrim(i, p)
     
-  | TmPrimFun(i, s,             ty,                                                            tmtylst)  ->
-    TmPrimFun(i, s, fty ntm nty ty, List.map (fun (tm, ty) -> (tf ntm nty tm, fty ntm nty ty)) tmtylst)
+  | TmPrimFun(i, s,             ty,                                                             tmtylst)  ->
+    TmPrimFun(i, s, fty ntm nty ty, List.map (fun (tm, ty) -> (ftm ntm nty tm, fty ntm nty ty)) tmtylst)
   
-  | TmBag(i,             ty,                       tmlst) ->
-    TmBag(i, fty ntm nty ty, List.map (tf ntm nty) tmlst)
+  | TmBag(i,             ty,                        tmlst) ->
+    TmBag(i, fty ntm nty ty, List.map (ftm ntm nty) tmlst)
   
-  | TmPair(i,            tm1,            tm2)   ->
-    TmPair(i, tf ntm nty tm1, tf ntm nty tm2)
+  | TmPair(i,             tm1,             tm2)   ->
+    TmPair(i, ftm ntm nty tm1, ftm ntm nty tm2)
   
-  | TmTensDest(i, bi_x, bi_y,            tm,                tm_i)   ->
-    TmTensDest(i, bi_x, bi_y, tf ntm nty tm, tf (ntm+2) nty tm_i)
+  | TmTensDest(i, bi_x, bi_y,             tm,                 tm_i)   ->
+    TmTensDest(i, bi_x, bi_y, ftm ntm nty tm, ftm (ntm+2) nty tm_i)
   
-  | TmAmpersand(i,            tm1,            tm2)  ->
-    TmAmpersand(i, tf ntm nty tm1, tf ntm nty tm2)
+  | TmAmpersand(i,             tm1,             tm2)  ->
+    TmAmpersand(i, ftm ntm nty tm1, ftm ntm nty tm2)
   
-  | TmLeft(i,            tm,             ty)    ->
-    TmLeft(i, tf ntm nty tm, fty ntm nty ty)
+  | TmLeft(i,             tm,             ty)    ->
+    TmLeft(i, ftm ntm nty tm, fty ntm nty ty)
   
-  | TmRight(i,            tm,             ty)   ->
-    TmRight(i, tf ntm nty tm, fty ntm nty ty)
+  | TmRight(i,             tm,             ty)   ->
+    TmRight(i, ftm ntm nty tm, fty ntm nty ty)
   
-  | TmUnionCase(i,            tm, bi_l,                tm_l, bi_r,                tm_r)   ->
-    TmUnionCase(i, tf ntm nty tm, bi_l, tf (ntm+1) nty tm_l, bi_r, tf (ntm+1) nty tm_r)
+  | TmUnionCase(i,             tm, bi_l,                 tm_l, bi_r,                 tm_r)   ->
+    TmUnionCase(i, ftm ntm nty tm, bi_l, ftm (ntm+1) nty tm_l, bi_r, ftm (ntm+1) nty tm_r)
   
   (* Abstraction and application *)
-  | TmAbs(i, bi, (            si,             ty),                            orty,                tm)  ->
-    TmAbs(i, bi, (fsi ntm nty si, fty ntm nty ty), (Option.map (fty ntm nty)) orty, tf (ntm+1) nty tm)
+  | TmAbs(i, bi, (            si,             ty),                            orty,                 tm)  ->
+    TmAbs(i, bi, (fsi ntm nty si, fty ntm nty ty), (Option.map (fty ntm nty)) orty, ftm (ntm+1) nty tm)
   
-  | TmApp(i,            tm1,            tm2)    ->
-    TmApp(i, tf ntm nty tm1, tf ntm nty tm2)
+  | TmApp(i,             tm1,             tm2)    ->
+    TmApp(i, ftm ntm nty tm1, ftm ntm nty tm2)
   
   (*  *)
-  | TmLet(i, bi,             si,            tm,                tm_i)  ->
-    TmLet(i, bi, fsi ntm nty si, tf ntm nty tm, tf (ntm+1) nty tm_i)
+  | TmLet(i, bi,             si,             tm,                 tm_i)  ->
+    TmLet(i, bi, fsi ntm nty si, ftm ntm nty tm, ftm (ntm+1) nty tm_i)
   
-  | TmLetRec(i, bi,                 ty,                tm,                tm_i)   ->
-    TmLetRec(i, bi, fty (ntm+1) nty ty, tf (ntm+1) nty tm, tf (ntm+1) nty tm_i)
+  | TmLetRec(i, bi,                 ty,                 tm,                 tm_i)   ->
+    TmLetRec(i, bi, fty (ntm+1) nty ty, ftm (ntm+1) nty tm, ftm (ntm+1) nty tm_i)
   
-  | TmSample(i, bi,            tm,                tm_i) ->
-    TmSample(i, bi, tf ntm nty tm, tf (ntm+1) nty tm_i)
+  | TmInfCheck(i, tm) -> TmInfCheck (i, ftm ntm nty tm)
+  
+  | TmSample(i, bi,             tm,                 tm_i) ->
+    TmSample(i, bi, ftm ntm nty tm, ftm (ntm+1) nty tm_i)
   
   (* Recursive datatypes *)
-  | TmFold(i,             ty,            tm)    ->
-    TmFold(i, fty ntm nty ty, tf ntm nty tm)
+  | TmFold(i,             ty,             tm)    ->
+    TmFold(i, fty ntm nty ty, ftm ntm nty tm)
   
-  | TmUnfold(i,            tm)    ->
-    TmUnfold(i, tf ntm nty tm)
+  | TmUnfold(i,             tm)    ->
+    TmUnfold(i, ftm ntm nty tm)
   
   (* Type definition *)
-  | TmTypedef(i, bi,                 ty,                tm) ->
-    TmTypedef(i, bi, fty ntm (nty+1) ty, tf ntm (nty+1) tm)
+  | TmTypedef(i, bi,                 ty,                 tm) ->
+    TmTypedef(i, bi, fty ntm (nty+1) ty, ftm ntm (nty+1) tm)
   
   (* Type abstraction and application *)
-  | TmTyApp (i,            tm,             ty)  ->
-    TmTyApp (i, tf ntm nty tm, fty ntm nty ty)
+  | TmTyApp (i,             tm,             ty)  ->
+    TmTyApp (i, ftm ntm nty tm, fty ntm nty ty)
   
-  | TmTyAbs (i, bi,                tm)    ->
-    TmTyAbs (i, bi, tf ntm (nty+1) tm)
+  | TmTyAbs (i, bi,                 tm)    ->
+    TmTyAbs (i, bi, ftm ntm (nty+1) tm)
   
   (* Convenience *)
-  | TmIfThenElse (i,            b,            t,            e)    ->
-    TmIfThenElse (i, tf ntm nty b, tf ntm nty t, tf ntm nty e)
+  | TmIfThenElse (i,             b,             t,             e)    ->
+    TmIfThenElse (i, ftm ntm nty b, ftm ntm nty t, ftm ntm nty e)
 
 
 
@@ -164,9 +168,9 @@ let rec tm_map
 
 (* Shift all of the type variables by the given amount *)
 let rec ty_shiftTy (o : int) (n : int) (ty : ty) : ty = 
-  let fv  k v  = TyVar (var_shift k n v)      in
-  let fsi k si = si_shiftTy k n si            in
-  ty_map o fv fsi ty
+  let fv  _ k v  = TyVar (var_shift k n v)      in
+  let fsi _ k si = si_shiftTy k n si            in
+  ty_map 0 o fv fsi ty
 
 and si_shiftTy (o : int) (n : int) (si : si) : si =
   si_map (tm_shiftTy o n) si
@@ -186,22 +190,22 @@ let rec tm_shiftTm (o : int) (n : int) (tm : term) : term =
   tm_map o 0 fv fty fsi tm
 
 and ty_shiftTm (o : int) (n : int) (ty : ty) : ty = 
-  let fv _ v = TyVar v  in
-  ty_map o fv (fun _ -> si_shiftTm o n) ty
+  let fv _ _ v = TyVar v  in
+  ty_map o 0 fv (fun k _ -> si_shiftTm k n) ty
 
 and si_shiftTm (o : int) (n : int) (si : si) : si =
   si_map (tm_shiftTm o n) si
 
 
-let rec tm_mapTm (f : info -> var_info -> term) (tm : term) : term = 
-  let fv _ _ = f in
-  let fty _ _ ty = ty_mapTm f ty in
-  let fsi _ _ si = si_mapTm f si in
-  tm_map 0 0 fv fty fsi tm
-and ty_mapTm f ty = 
-  let fv _ v = TyVar v in
-  ty_map 0 fv (fun _ -> si_mapTm f) ty
-and si_mapTm f si = si_map (tm_mapTm f) si
+let rec tm_mapTm (f : int -> info -> var_info -> term) (k : int) (tm : term) : term = 
+  let fv  ktm _ = f ktm in
+  let fty ktm _ ty = ty_mapTm f ktm ty in
+  let fsi ktm _ si = si_mapTm f ktm si in
+  tm_map k 0 fv fty fsi tm
+and ty_mapTm f k ty = 
+  let fv _ _ v = TyVar v in
+  ty_map k 0 fv (fun ktm _ -> si_mapTm f ktm) ty
+and si_mapTm f k si = si_map (tm_mapTm f k) si
 
 
 
@@ -214,13 +218,13 @@ let rec ty_substTy
     (x : int)   (* The Debruijn index of the type variable we are replacing. *)
     (ty : ty)   (* The input type over which we are doing the substitution. *)
     : ty =
-  let fv kty v = 
+  let fv ktm kty v = 
     if kty = v.v_index then
       ty_shiftTm 0 ktm (ty_shiftTy 0 kty t)
     else
       TyVar (var_shift kty (-1) v)    in
-  let fsi k si = si_substTy t ktm k si  in
-  ty_map x fv fsi ty
+  let fsi ktm kty si = si_substTy t ktm kty si  in
+  ty_map ktm x fv fsi ty
 
 and si_substTy (t : ty) (ktm : int) (x : int) (si : si) : si =
   si_map (tm_substTy t ktm x) si
@@ -252,8 +256,8 @@ let rec tm_substTm
   tm_map x kty fv fty fsi tm
 
 and ty_substTm (t : term) (x : int) (kty : int) (ty : ty) : ty = 
-  let fv _ v = TyVar v in
-  ty_map kty fv (si_substTm t x) ty
+  let fv _ _ v = TyVar v in
+  ty_map x kty fv (si_substTm t) ty
 and si_substTm (t : term) (x : int) (kty : int) (si : si) : si = 
   si_map (tm_substTm t x kty) si
 
@@ -261,18 +265,18 @@ and si_substTm (t : term) (x : int) (kty : int) (si : si) : si =
 
 
 (************************************************************************)
-(* Term and type valuation and equality *)
+(* Syntactic equality *)
 
 let rec tmEq (t1 : term) (t2 : term) : bool = 
   match t1, t2 with
   | TmVar(_,v1), 
-    TmVar(_,v2) -> v1 = v2
+    TmVar(_,v2) -> v1.v_index = v2.v_index
   | TmPrim(_,p1), 
     TmPrim(_,p2) -> p1 = p2
   | TmPrimFun(_,_,ty1,tmtyl1), 
-    TmPrimFun(_,_,ty2,tmtyl2) -> false
+    TmPrimFun(_,_,ty2,tmtyl2) -> tyEq ty1 ty2 && List.for_all2 (fun (tm1,ty1) (tm2,ty2) -> tmEq tm1 tm2 && tyEq ty1 ty2) tmtyl1 tmtyl2
   | TmBag(_, ty1, tml1), 
-    TmBag(_, ty2, tml2) -> false
+    TmBag(_, ty2, tml2) -> tyEq ty1 ty2 && List.for_all2 tmEq tml1 tml2
   | TmPair(_, t1a, t1b),
     TmPair(_, t2a, t2b) -> tmEq t1a t2a && tmEq t1b t2b
   | TmTensDest(_, _, _, t1a, t1b),
@@ -280,14 +284,76 @@ let rec tmEq (t1 : term) (t2 : term) : bool =
   | TmAmpersand(_, t1a, t1b),
     TmAmpersand(_, t2a, t2b) -> tmEq t1a t2a && tmEq t1b t2b
   | TmLeft(_, tm1, ty1),
-    TmLeft(_, tm2, ty2) -> tmEq tm1 tm2
+    TmLeft(_, tm2, ty2) -> tyEq ty1 ty2 && tmEq tm1 tm2
   | TmRight(_, tm1, ty1),
-    TmRight(_, tm2, ty2) -> tmEq tm1 tm2
+    TmRight(_, tm2, ty2) -> tyEq ty1 ty2 && tmEq tm1 tm2
   | TmUnionCase(_, t1a, _, t1b, _, t1c),
     TmUnionCase(_, t2a, _, t2b, _, t2c) -> tmEq t1a t2a && tmEq t1b t2b && tmEq t1c t2c
+  | TmApp(_, t1a, t1b),
+    TmApp(_, t2a, t2b) -> tmEq t1a t2a && tmEq t1b t2b
+  | TmAbs(_, _, (si1, ty1), tyo1, t1),
+    TmAbs(_, _, (si2, ty2), tyo2, t2) -> siEq si1 si2 && tyEq ty1 ty2 
+                                      && (match tyo1, tyo2 with Some t, Some t' -> tyEq t t' | _,_ -> tyo1 = tyo2)
+                                      && tmEq t1 t2
   | TmFold(_, ty1, tm1),
-    TmFold(_, ty2, tm2) -> tmEq tm1 tm2
+    TmFold(_, ty2, tm2) -> tyEq ty1 ty2 && tmEq tm1 tm2
+  | TmUnfold(_, tm1),
+    TmUnfold(_, tm2) -> tmEq tm1 tm2
+  | TmLet(_, _, si1, t1a, t1b),
+    TmLet(_, _, si2, t2a, t2b) -> siEq si1 si2 && tmEq t1a t2a && tmEq t1b t2b
+  | TmLetRec(_, _, ty1, t1a, t1b),
+    TmLetRec(_, _, ty2, t2a, t2b) -> tyEq ty1 ty2 && tmEq t1a t2a && tmEq t1b t2b
+  | TmSample(_, _, t1a, t1b),
+    TmSample(_, _, t2a, t2b) -> tmEq t1a t2a && tmEq t1b t2b
+  | TmTyAbs(_, _, tm1),
+    TmTyAbs(_, _, tm2) -> tmEq tm1 tm2
+  | TmTyApp(_, tm1, ty1),
+    TmTyApp(_, tm2, ty2) -> tmEq tm1 tm2 && tyEq ty1 ty2 
+  | TmTypedef(_, _, ty1, tm1),
+    TmTypedef(_, _, ty2, tm2) -> tyEq ty1 ty2 && tmEq tm1 tm2
+  | TmIfThenElse(_, t1a, t1b, t1c),
+    TmIfThenElse(_, t2a, t2b, t2c) -> tmEq t1a t2a && tmEq t1b t2b && tmEq t1c t2c
+  | TmInfCheck(_, tm1), tm2 -> tmEq tm1 tm2
+  | tm1, TmInfCheck(_, tm2) -> tmEq tm1 tm2
   | _,_ -> false
+
+and tyEq (t1 : ty) (t2 : ty) : bool = 
+  match t1, t2 with
+  | TyVar v1, 
+    TyVar v2 -> v1.v_index = v2.v_index
+  | TyPrim p1,
+    TyPrim p2 -> p1 = p2
+  | TyPrim1(p1, ty1),
+    TyPrim1(p2, ty2) -> p1 = p2 && tyEq ty1 ty2
+  | TyUnion(ty1a, ty1b),
+    TyUnion(ty2a, ty2b) -> tyEq ty1a ty2a && tyEq ty1b ty2b
+  | TyTensor(ty1a, ty1b),
+    TyTensor(ty2a, ty2b) -> tyEq ty1a ty2a && tyEq ty1b ty2b
+  | TyAmpersand(ty1a, ty1b),
+    TyAmpersand(ty2a, ty2b) -> tyEq ty1a ty2a && tyEq ty1b ty2b
+  | TyLollipop(ty1a, si1, ty1b),
+    TyLollipop(ty2a, si2, ty2b) -> tyEq ty1a ty2a && siEq si1 si2 && tyEq ty1b ty2b
+  | TyMu(_, ty1),
+    TyMu(_, ty2) -> tyEq ty1 ty2
+  | TyForall(_, ty1),
+    TyForall(_, ty2) -> tyEq ty1 ty2
+  | _,_ -> false
+
+and siEq (s1 : si) (s2 : si) : bool = 
+  match s1, s2 with
+  | SiInfty, SiInfty -> true
+  | SiConst f1, SiConst f2 -> f1 = f2
+  | SiTerm t1, SiTerm t2 -> tmEq t1 t2
+  | SiAdd(si1a, si1b),
+    SiAdd(si2a, si2b) -> siEq si1a si2a && siEq si1b si2b
+  | SiMult(si1a, si1b),
+    SiMult(si2a, si2b) -> siEq si1a si2a && siEq si1b si2b
+  | SiLub(si1a, si1b),
+    SiLub(si2a, si2b) -> siEq si1a si2a && siEq si1b si2b
+  | _,_ -> false
+
+(************************************************************************)
+(* Valuation *)
 
 let rec tmIsVal (t : term) : bool = match t with
   | TmPrim(_,_)     -> true
@@ -339,6 +405,7 @@ let tmInfo t = match t with
   (* Bindings *)
   | TmLet(fi,_,_,_,_)           -> fi
   | TmLetRec(fi,_,_,_,_)        -> fi
+  | TmInfCheck(fi,_)            -> fi
   | TmSample(fi,_,_,_)          -> fi
 
   (* Recursive datatypes *)

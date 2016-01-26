@@ -34,13 +34,13 @@ module InterpMonad = struct
   open Ctx
     
   let (>>=) (m : 'a interpreter) (f : 'a -> 'b interpreter) : 'b interpreter =
-    fun ((db, pe, plst) as inp) -> match m inp with
-      | (db', Ok a)       -> f a (db', pe, plst)
+    fun ((db, pe, rectms, plst) as inp) -> match m inp with
+      | (db', Ok a)       -> f a (db', pe, rectms, plst)
       | (_, Error _) as e   -> e
   
   let (>>) m f = m >>= fun _ -> f
   
-  let return (x : 'a) : 'a interpreter = fun (db, _, _) -> (db, Ok x)
+  let return (x : 'a) : 'a interpreter = fun (db, _, _, _) -> (db, Ok x)
   
   let rec mapM (f : 'a -> 'b interpreter) (lst : 'a list) : ('b list) interpreter = 
     match lst with
@@ -74,25 +74,33 @@ module InterpMonad = struct
   
   (* Failing should never happen.  It is always due to either a type problem, which means the 
      type checker has failed, or a primitive problem. *)
-  let fail (message : string) : 'a interpreter = fun (db, _, _) -> (db, Error message)
+  let fail (message : string) : 'a interpreter = fun (db, _, _, _) -> (db, Error message)
   
   let withFailTerm (tm : term) (m : term interpreter) : term interpreter = 
-    fun ((_, pe, _) as inp) -> match m inp with
+    fun ((_, pe, _, _) as inp) -> match m inp with
       | (_, Ok _) as res -> res
       | (db, Error s) as res -> if pe
         then begin
-          interp_messageNoFi 4 "--- Skipping failure \"%s\"; reverting to state %a." s Print.pp_term tm;
+          interp_messageNoFi 4 "--- Skipping failure \"%s\"; reverting to state %a." s pp_term tm;
           (db, Ok tm)
         end else res
   
   let inPartial (m : 'a interpreter) : 'a interpreter = 
-    fun (db, _, plst) -> m (db, true, plst)
+    fun (db, _, rectms, plst) -> m (db, true, rectms, plst)
   
   let isInPartial : bool interpreter = 
-    fun (db, pe, _) -> (db, Ok pe)
+    fun (db, pe, _, _) -> (db, Ok pe)
+  
+  let withRecTerm (t : term) (m : 'a interpreter) : 'a interpreter = 
+    fun (db, pe, rectms, plst) -> m (db, pe, t::rectms, plst)
+  
+  let seenRecTerm (t : term) : bool interpreter = 
+    fun (db, _, rectms, _) -> 
+    interp_messageNoFi 4 "Current list is: %a." (pp_list pp_term) rectms;
+    (db, Ok (List.exists (tmEq t) rectms))
   
   let attemptRedZone (sens : epsilon) : bool interpreter =
-    fun (db, _, _) -> match db with
+    fun (db, _, _, _) -> match db with
       | None -> (db, Error "**Interpreter** Tried to store a sensitivity when no DB was loaded")
       | Some (db, eps, silist) -> let sum = List.fold_left (+.) 0. silist in
             if sum +. sens > eps
@@ -100,12 +108,12 @@ module InterpMonad = struct
             else (Some (db, eps, sens :: silist), Ok true)
   
   let getDB : term interpreter = 
-    fun (o, _, _) -> match o with
+    fun (o, _, _, _) -> match o with
       | None -> (o, Error "**Interpreter** No database loaded")
       | Some (db,_,_) -> (o, Ok db)
   
   let storeDB (db : term) (budget : epsilon) : unit interpreter = 
-    fun (db_init, pe, _) -> if pe
+    fun (db_init, pe, _, _) -> if pe
       then begin interp_messageNoFi 1 "Trying to storeDB in red zone.  Quietly skipping ...";
                  (db_init, Ok ())
       end else (Some (db, budget, []), Ok ())
@@ -114,12 +122,12 @@ module InterpMonad = struct
     return 0.0
   
   let getEpsilon : epsilon interpreter = 
-    fun (db, _, _) -> match db with
+    fun (db, _, _, _) -> match db with
       | None -> (db, Error "**Interpreter** Tried to get remaining epsilon budget when no DB was loaded")
       | Some (_, eps, silist) -> (db, Ok (eps -. (List.fold_left (+.) 0. silist)))
   
   let getPrimDefs : ((string * primfun) list) interpreter = 
-    fun (db, _, plst) -> (db, Ok plst)
+    fun (db, _, _, plst) -> (db, Ok plst)
   
   let lookup_prim (id : string) : (ty * term list -> term interpreter) interpreter =
     let rec lookup l = match l with
@@ -130,6 +138,27 @@ module InterpMonad = struct
 end
 
 open InterpMonad
+
+(* This function does some simple type inference.
+   We expect the term f to be an abstraction with one free type variable, 
+   and we return a term with that variable filled in such that the argument 
+   is now applicable to the abstraction.
+   Note that for this simple version, we demand that f be a value 
+   abstraction (NOT a type abstraction) and that its argument must fully 
+   determine the type variable immediately. *)
+let appTypeInfer (f : term) (arg : term) : term interpreter = 
+  let ty_arg = Tycheck.get_type false arg in
+  match f with
+  | TmAbs(_,_,(_,expectedTy),_,tm) -> begin match expectedTy, ty_arg with
+      | TyVar v, _ -> if v.v_index = 0 then return (tm_substTy ty_arg 0 0 f)
+                      else fail "**Interpreter** Bad type inference"
+      | TyPrim1 (t, TyVar v), TyPrim1 (t', ty_arg') ->
+            if v.v_index = 0 && t' = t then return (tm_substTy ty_arg' 0 0 f)
+                      else fail "**Interpreter** Bad type inference"
+      | _,_ -> fail "**Interpreter** Bad type inference"
+      end
+  | _ -> fail "**Interpreter** Bad type inference"
+
 
 (* val interp : term -> value interpreter *)
 let rec interp t = withFailTerm t @@ match t with
@@ -180,12 +209,12 @@ let rec interp t = withFailTerm t @@ match t with
       begin match t' with
         | TmLeft (i',tl,_) -> interp (tm_substTm tl 0 0 tlBody)
         | TmRight(i',tr,_) -> interp (tm_substTm tr 0 0 trBody)
-        | _                -> isInPartial >>= fun partial ->
+        | _                -> (*isInPartial >>= fun partial ->
                               if partial
-                              then ((*interp tlBody >>= fun tlBody -> 
-                                    interp trBody >>= fun trBody -> *)
+                              then (interp tlBody >>= fun tlBody -> 
+                                    interp trBody >>= fun trBody -> 
                                     return @@ TmUnionCase(i, t', bl, tlBody, br, trBody))
-                              else fail @@ pp_to_string "**Interpreter** " "Union expected a sum value but found %a" pp_term t'
+                              else*) fail @@ pp_to_string "**Interpreter** " "Union expected a sum value but found %a" pp_term t'
       end
 
   (* Regular Abstraction and Applicacion *)
@@ -207,7 +236,7 @@ let rec interp t = withFailTerm t @@ match t with
                 begin match tf with
                         | TmAbs(_,_,_,_,t) -> interp (tm_substTm ta 0 0 t) 
                           (* The case of inferred application. TODO: This should really propogate the found type. *)
-                        | TmTyAbs(i, bi, tm)  -> interp (TmApp(i, tm, ta))
+                        | TmTyAbs(i, bi, tm)    -> appTypeInfer tm ta >>= fun tm -> interp (TmApp(i, tm, ta))
                         | _ -> withFailTerm (TmApp(i, tf, ta))
                                 (fail @@ pp_to_string "**Interpreter** " "Application expected a Prim or Lambda value but found %a." pp_term tf)
                 end
@@ -247,14 +276,22 @@ let rec interp t = withFailTerm t @@ match t with
       interp_debug i "--- Finishing let.  New term is: %a." Print.pp_term (tm_substTm t 0 0 tBody);*)
       isInPartial >>= fun partial ->
       if partial && (not (tmIsVal t))
-      then interp tBody >>= fun tBody -> return (TmLet(i,b,si,t,tBody))
+      then withFailTerm (TmLet(i,b,si,t,tBody)) (interp tBody >>= fun tBody -> return (TmLet(i,b,si,t,tBody)))
       else interp (tm_substTm t 0 0 tBody)
   
   | TmLetRec(i, b, ty, t, tBody) ->
-(*      isInPartial >>= fun partial ->
-      (if partial then interp t else return t) >>= fun t ->*)
+      isInPartial >>= fun partial ->
+(*       (if partial then interp t else return t) >>= fun t -> *)
       let t' = tm_substTm (TmLetRec(i, b, ty, t, TmVar(i,var_from_binder 0 b))) 0 0 t in
+(*      interp_debug i "--- Interpreting letrec: Replacing %s with %a." b.b_name Print.pp_term t';
+      interp_debug i "--- Finishing letrec.  New term is: %a." Print.pp_term (tm_substTm t' 0 0 tBody);*)
       interp (tm_substTm t' 0 0 tBody)
+  
+  | TmInfCheck(i, tm) -> interp tm
+(*      interp_debug i "Inf checking term=%a" pp_term tm;
+      seenRecTerm tm >>= fun seen ->
+      if seen then (interp_warning i "Infinite Loop detected"; fail "**Interpreter** Infinite loop detected.")
+      else withRecTerm tm (interp tm)*)
   
   | TmSample(i, b, t, tBody) ->
     (* Do not interpret sample during partial application *)
@@ -298,7 +335,7 @@ let rec interp t = withFailTerm t @@ match t with
 (* Equivalent to run *)
 (* val run_interp : term -> (string * primfun) list -> string *)
 let run_interp program prims =
-  match interp program (None, false, prims) with
+  match interp program (None, false, [], prims) with
   | (_, Ok (TmPrim(_,PrimTString(s))))  -> s
   | (_, Ok _)       -> interp_error "%s" "Interpreter returned a non-string value"
   | (_, Error s)    -> interp_error "%s" s

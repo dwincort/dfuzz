@@ -74,8 +74,8 @@ let from_args_to_term qf arg_list body =
   qf_to_term qf (list_to_term arg_list body)
 
 let mkNewVarsInType ty ctx = 
-  let f i v = TmVar(i, existing_var i v.v_name ctx) in
-  ty_mapTm f ty
+  let f k i v = TmVar(i, var_shift 0 k (existing_var i v.v_name ctx)) in
+  ty_mapTm f 0 ty
 
 (* When we're making this list for primFuns, the type may have terms in it (e.g. 
    SiTerms).  They must be appropriately indexed, so we remake them with the 
@@ -261,6 +261,7 @@ Term :
         let ctx_let          = extend_var $2.v ctx        in
         let (qf,   ctx_qf)   = $3 ctx_let                 in
         let (args, ctx_args) = $4 ctx_qf                  in
+(*        let body             = TmInfCheck ($2.i, $8 ctx_args)          in*)
         let f_type           = from_args_to_type qf args ($6 ctx_args) in
         let f_term           = from_args_to_term qf args ($8 ctx_args) in
 
@@ -474,9 +475,9 @@ ComplexType :
   | AType ADD ComplexType
       { fun ctx -> TyUnion($1 ctx, $3 ctx) }
   | AType LOLLIPOP ComplexType
-      { fun ctx -> TyLollipop($1 ctx, SiConst 1.0, $3 ctx) }
+      { fun ctx -> TyLollipop($1 ctx, SiConst 1.0, $3 (extend_var "__dummy" ctx)) }
   | AType LOLLIPOP LBRACK SensTerm RBRACK ComplexType
-      { fun ctx -> TyLollipop($1 ctx, $4 ctx, $6 ctx) }
+      { fun ctx -> TyLollipop($1 ctx, $4 ctx, $6 (extend_var "__dummy" ctx)) }
   | FUZZY Type
       { fun ctx -> TyPrim1 (Prim1Fuzzy, ($2 ctx)) }
   | AType
