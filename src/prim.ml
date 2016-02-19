@@ -265,7 +265,7 @@ let tyCheckFuzzFun
     onlyInFullEval "tyCheckFuzz" (return ()) >>
     let genFailResult s = return (TmLeft(di, TmPrim(di, PrimTString s), TyPrim PrimUnit)) in
     message 3 "--- tyCheckFuzz: Before Partial evaluation: %a" pp_term f;
-    inPartial (Interpreter.interp f) >>= fun pf ->
+    inPartial (Interpreter.goUnderLambda f) >>= fun pf ->
     message 3 "--- tyCheckFuzz: Partial evaluation results in: %a" pp_term pf;
     match Tycheck.type_of pf (Ctx.empty_context, true) with 
         | Error e -> genFailResult @@ pp_to_string "" "%a" Tycheck.pp_tyerr e.v
@@ -299,7 +299,7 @@ let runRedZone
         end in
     getDB >>= fun db ->
     message 3 "--- RunRedZone: Before Partial evaluation: %a" pp_term f;
-    inPartial (Interpreter.interp f) >>= fun pf ->
+    inPartial (Interpreter.goUnderLambda f) >>= fun pf ->
     message 3 "--- RunRedZone: Partial evaluation results in: %a" pp_term pf;
     match Tycheck.type_of pf (Ctx.empty_context, true) with 
         | Error e -> genFailResult @@ pp_to_string "" "%a" Tycheck.pp_tyerr e.v
@@ -552,7 +552,7 @@ let prim_list : (string * primfun) list = [
 ("print",   fun_of_1arg "print"   exString mkUnit (fun s -> printMsg di "%s" s ; ()));
 
 (* Probability monad operations *)
-("_return", fun_of_1arg "_return" exAny mkAny (fun x -> x));
+("_return", fun_of_1arg_i "_return" exAny mkAny (fun x -> onlyInFullEval "return" (return x)));
 
 ("loadDB", fun_of_2args_i "loadDB" exAny exNum mkUnit storeDB);
 

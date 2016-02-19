@@ -25,6 +25,7 @@ val ty_shiftTy  : int -> int -> ty -> ty
 
 (* Apply a function to all term variables *)
 val ty_mapTm : (int -> info -> var_info -> term) -> int -> ty -> ty
+val si_mapTm : (int -> info -> var_info -> term) -> int -> si -> si
 
 (* Capture avoiding sub, the term must be dependent on the number of
    binders under it is replaced *)

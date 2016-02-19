@@ -34,10 +34,8 @@ assertEq@[num]          "Lists #18" (index@[num] 0.0 3 l456) 0.0;
 assertEq@[list(num)]    "Lists #19" (performAt@[num] 1 (fun (x : num) : num { x + 1 }) l123) (cons@[num] 1.0 (cons@[num] 3.0 (cons@[num] 3.0 nil@[num])));
 assertEq@[list(num)]    "Lists #20" (list_lmap@[num]@[num] 3.0 (fun (x : num) : num { scale 3 x }) l123) 
                                     (cons@[num] 3.0 (cons@[num] 6.0 (cons@[num] 9.0 nil@[num])));
-assertEq@[(string+())]  "Lists #21" (tyCheckFuzz@[list(num)]@[list(num)] 3.0 (list_lmap@[num]@[num] 3.0 (fun (x :[3] num) : num { scale 3 x })))
-                                    (inr@[string]@[()]{()});
-assertEq@[(string+())]  "Lists #22" (tyCheckFuzz@[list(num)]@[list(num)] 6.0 (vectorMap@[num]@[num] 2 3 0.0 (fun (x :[2] num) : num { scale 2 x })))
-                                    (inr@[string]@[()]{()});
+assertTyCheck@[list(num)]@[list(num)]  "Lists #21" true 3.0 (list_lmap@[num]@[num] 3.0 (fun (x :[3] num) : num { scale 3 x }));
+assertTyCheck@[list(num)]@[list(num)]  "Lists #22" true 6.0 (vectorMap@[num]@[num] 2 3 0.0 (fun (x :[2] num) : num { scale 2 x }));
 assertEq@[list(num)]    "Lists #23" (vectorMap@[num]@[num] 2 3 0.0 (fun (x :[2] num) : num { scale 2 x }) l123) l246;
                                     
 assertEq@[num]          "Lists #24" (absum l123) 6.0;

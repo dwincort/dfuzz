@@ -93,8 +93,12 @@ let rec tm_map
   | TmPrim(i, p) ->
     TmPrim(i, p)
     
-  | TmPrimFun(i, s,             ty,                                                             tmtylst)  ->
-    TmPrimFun(i, s, fty ntm nty ty, List.map (fun (tm, ty) -> (ftm ntm nty tm, fty ntm nty ty)) tmtylst)
+  | TmPrimFun(i, s,             ty, ttslst)  ->
+    let ttslst' = List.map (fun (tm, ty, si, b) -> (ftm ntm nty tm, fty ntm nty ty, fsi ntm nty si, b)) ttslst in
+    TmPrimFun(i, s, fty ntm nty ty, ttslst')
+  
+  | TmRecFun(i, bi,                 ty,                 tm, isRec)  ->
+    TmRecFun(i, bi, fty (ntm+1) nty ty, ftm (ntm+1) nty tm, isRec)
   
   | TmBag(i,             ty,                        tmlst) ->
     TmBag(i, fty ntm nty ty, List.map (ftm ntm nty) tmlst)
@@ -127,11 +131,6 @@ let rec tm_map
   (*  *)
   | TmLet(i, bi,             si,             tm,                 tm_i)  ->
     TmLet(i, bi, fsi ntm nty si, ftm ntm nty tm, ftm (ntm+1) nty tm_i)
-  
-  | TmLetRec(i, bi,                 ty,                 tm,                 tm_i)   ->
-    TmLetRec(i, bi, fty (ntm+1) nty ty, ftm (ntm+1) nty tm, ftm (ntm+1) nty tm_i)
-  
-  | TmInfCheck(i, tm) -> TmInfCheck (i, ftm ntm nty tm)
   
   | TmSample(i, bi,             tm,                 tm_i) ->
     TmSample(i, bi, ftm ntm nty tm, ftm (ntm+1) nty tm_i)
@@ -249,7 +248,7 @@ let rec tm_substTm
     (tm : term) (* The input term over which we are doing the substitution. *)
     : term =
   let fv ktm kty i v = if ktm = v.v_index
-    then tm_shiftTy 0 kty (tm_shiftTm 0 (ktm-x) t)
+    then tm_shiftTy 0 kty (tm_shiftTm 0 ktm t)
     else TmVar (i, var_shift ktm (-1) v) in
   let fty k kty ty = ty_substTm t k kty ty  in
   let fsi k kty si = si_substTm t k kty si  in
@@ -273,8 +272,9 @@ let rec tmEq (t1 : term) (t2 : term) : bool =
     TmVar(_,v2) -> v1.v_index = v2.v_index
   | TmPrim(_,p1), 
     TmPrim(_,p2) -> p1 = p2
-  | TmPrimFun(_,_,ty1,tmtyl1), 
-    TmPrimFun(_,_,ty2,tmtyl2) -> tyEq ty1 ty2 && List.for_all2 (fun (tm1,ty1) (tm2,ty2) -> tmEq tm1 tm2 && tyEq ty1 ty2) tmtyl1 tmtyl2
+  | TmPrimFun(_,_,ty1,ttsl1), 
+    TmPrimFun(_,_,ty2,ttsl2) -> tyEq ty1 ty2 && List.for_all2 
+        (fun (tm1,ty1,si1,_) (tm2,ty2,si2,_) -> tmEq tm1 tm2 && tyEq ty1 ty2 && siEq si1 si2) ttsl1 ttsl2
   | TmBag(_, ty1, tml1), 
     TmBag(_, ty2, tml2) -> tyEq ty1 ty2 && List.for_all2 tmEq tml1 tml2
   | TmPair(_, t1a, t1b),
@@ -301,8 +301,8 @@ let rec tmEq (t1 : term) (t2 : term) : bool =
     TmUnfold(_, tm2) -> tmEq tm1 tm2
   | TmLet(_, _, si1, t1a, t1b),
     TmLet(_, _, si2, t2a, t2b) -> siEq si1 si2 && tmEq t1a t2a && tmEq t1b t2b
-  | TmLetRec(_, _, ty1, t1a, t1b),
-    TmLetRec(_, _, ty2, t2a, t2b) -> tyEq ty1 ty2 && tmEq t1a t2a && tmEq t1b t2b
+  | TmRecFun(_, _, ty1, t1, b1),
+    TmRecFun(_, _, ty2, t2, b2) -> tyEq ty1 ty2 && tmEq t1 t2 && (b1 = b2)
   | TmSample(_, _, t1a, t1b),
     TmSample(_, _, t2a, t2b) -> tmEq t1a t2a && tmEq t1b t2b
   | TmTyAbs(_, _, tm1),
@@ -313,8 +313,6 @@ let rec tmEq (t1 : term) (t2 : term) : bool =
     TmTypedef(_, _, ty2, tm2) -> tyEq ty1 ty2 && tmEq tm1 tm2
   | TmIfThenElse(_, t1a, t1b, t1c),
     TmIfThenElse(_, t2a, t2b, t2c) -> tmEq t1a t2a && tmEq t1b t2b && tmEq t1c t2c
-  | TmInfCheck(_, tm1), tm2 -> tmEq tm1 tm2
-  | tm1, TmInfCheck(_, tm2) -> tmEq tm1 tm2
   | _,_ -> false
 
 and tyEq (t1 : ty) (t2 : ty) : bool = 
@@ -404,8 +402,7 @@ let tmInfo t = match t with
 
   (* Bindings *)
   | TmLet(fi,_,_,_,_)           -> fi
-  | TmLetRec(fi,_,_,_,_)        -> fi
-  | TmInfCheck(fi,_)            -> fi
+  | TmRecFun(fi,_,_,_,_)        -> fi
   | TmSample(fi,_,_,_)          -> fi
 
   (* Recursive datatypes *)

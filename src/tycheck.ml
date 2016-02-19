@@ -92,6 +92,12 @@ module TypeCheckMonad = struct
   let fail (i : info) (e : ty_error_elem) : 'a checker = fun _ ->
     Error { i = i; v = e }
   
+  let failToOption (m : 'a checker) : (('a, ty_error_elem) result) checker =
+    fun ctxb -> 
+      match m ctxb with
+      | Ok res  -> Ok (Ok res)
+      | Error e -> Ok (Error (e.v))
+  
   let get_ctx : context checker =
     fun ctxb -> Ok (fst ctxb)
   
@@ -280,51 +286,68 @@ module TypeSub = struct
   open Ctx
   open TypeCheckMonad
   
-  let check_prim_sub (i : info) (ty_f : ty_prim) (ty_a : ty_prim) : unit checker =
-    match ty_f, ty_a with
-    | PrimNum, PrimClipped  -> return ()
-    | PrimNum, PrimInt      -> return ()
-    | _   when ty_f = ty_a  -> return ()
-    | _                     -> fail i @@ NotSubtype (TyPrim ty_f, TyPrim ty_a)
-
-  (* Check whether ty_1 is a subtype of ty_2, generating the necessary
-     constraints along the way. *)
-  let rec check_type_sub (i : info) (ty_1 : ty) (ty_2 : ty) : unit checker =
-    let fail = fail i @@ NotSubtype (ty_1, ty_2) in
+  let check_prim_sub (ty_1 : ty_prim) (ty_2 : ty_prim) : bool =
     match ty_1, ty_2 with
-    | TyVar v1, TyVar v2   ->
-      if v1 = v2 then return () else fail
+    | PrimClipped, PrimNum  -> true
+    | PrimInt, PrimNum      -> true
+    | _   when ty_1 = ty_2  -> true
+    | _                     -> false
 
-    | TyPrim p1, TyPrim p2 -> check_prim_sub i p1 p2
-
-    | TyPrim1(pl, tyl), TyPrim1(pr, tyr) ->
-      if pl = pr then check_type_sub i tyl tyr else fail
-
-    | TyUnion(tyl1, tyl2), TyUnion(tyr1, tyr2) ->
-      check_type_sub i tyl1 tyr1 >>
-      check_type_sub i tyl2 tyr2
-
-    | TyTensor(tyl1, tyl2), TyTensor(tyr1, tyr2) ->
-      check_type_sub i tyl1 tyr1 >>
-      check_type_sub i tyl2 tyr2
-
-    | TyAmpersand(tyl1, tyl2), TyAmpersand(tyr1, tyr2) ->
-      check_type_sub i tyl1 tyr1 >>
-      check_type_sub i tyl2 tyr2
-
-    | TyLollipop(tyl1, sil, tyl2), TyLollipop(tyr1, sir, tyr2) ->
-      check_type_sub i tyr1 tyl1 >>
-      check_type_sub i tyl2 tyr2 >>
-      TypeSens.check_sens_leq i sir sil
-
-    | TyMu(_bl, tyl), TyMu(_br, tyr) ->
-      check_type_sub i tyl tyr
-
-    | TyForall(bl, tyl), TyForall(_br, tyr) ->
-      with_new_ctx (extend_ctx_with_tyvar' bl.b_name) (check_type_sub i tyl tyr)
-
-    | _, _ -> fail
-
+  (* Check whether ty_1 is a subtype of ty_2. *)
+  let check_type_sub (i : info) (ty_1 : ty) (ty_2 : ty) : unit checker =
+    let fail = fail i @@ NotSubtype (ty_1, ty_2) in
+    let rec inner (ty_1 : ty) (ty_2 : ty) : unit checker =
+      match ty_1, ty_2 with
+      | TyVar v1, TyVar v2   ->
+        if v1 = v2 then return () else fail
+  
+      | TyPrim p1, TyPrim p2 -> if check_prim_sub p1 p2 then return () else fail
+  
+      | TyPrim1(pl, tyl), TyPrim1(pr, tyr) ->
+        if pl = pr then inner tyl tyr else fail
+  
+      | TyUnion(tyl1, tyl2), TyUnion(tyr1, tyr2) ->
+        inner tyl1 tyr1 >>
+        inner tyl2 tyr2
+  
+      | TyTensor(tyl1, tyl2), TyTensor(tyr1, tyr2) ->
+        inner tyl1 tyr1 >>
+        inner tyl2 tyr2
+  
+      | TyAmpersand(tyl1, tyl2), TyAmpersand(tyr1, tyr2) ->
+        inner tyl1 tyr1 >>
+        inner tyl2 tyr2
+  
+      | TyLollipop(tyl1, sil, tyl2), TyLollipop(tyr1, sir, tyr2) ->
+        inner tyr1 tyl1 >>
+        inner tyl2 tyr2 >>
+        TypeSens.check_sens_leq i sil sir
+  
+      | TyMu(_bl, tyl), TyMu(_br, tyr) ->
+        inner tyl tyr
+  
+      | TyForall(_bl, tyl), TyForall(_br, tyr) ->
+        (*with_new_ctx (extend_ctx_with_tyvar' bl.b_name)*) (inner tyl tyr)
+  
+      | _, _ -> fail
+    in inner ty_1 ty_2
+  
+  let find_super_type (i : info) (ty_1 : ty) (ty_2 : ty) : ty checker =
+    failToOption (check_type_sub i ty_1 ty_2) >>= fun ty1subty2 ->
+    failToOption (check_type_sub i ty_2 ty_1) >>= fun ty2subty1 ->
+    match ty1subty2, ty2subty1 with
+    | Ok (),   Ok ()   -> return ty_1
+    | Ok (),   Error _ -> return ty_1
+    | Error _, Ok ()   -> return ty_2
+    | Error _, Error _ -> fail i @@ TypeMismatch (ty_1, ty_2)
+  
+  let check_type_equal (i : info) (ty_1 : ty) (ty_2 : ty) : unit checker =
+    failToOption (check_type_sub i ty_1 ty_2) >>= fun ty1subty2 ->
+    failToOption (check_type_sub i ty_2 ty_1) >>= fun ty2subty1 ->
+    match ty1subty2, ty2subty1 with
+    | Ok (), Ok ()  -> return ()
+    | _,     _      -> fail i @@ TypeMismatch (ty_1, ty_2)
+  
   (* Check whether ty is compatible (modulo subtyping) with annotation
      ann, returning the resulting type. *)
   let check_type_ann (i : info) (ann : ty option) (ty : ty) : ty checker =
@@ -350,7 +373,7 @@ module TypeSub = struct
         | None    -> fail i @@ CannotApply(ty, ty_arg)
       end
     | TyLollipop(tya, si, tyb) ->
-      check_type_sub i tya ty_arg >>
+      check_type_sub i ty_arg tya >>
       return (tyb, si)
     | _                        -> fail i @@ CannotApply(ty_arr, ty_arg)
 
@@ -431,15 +454,17 @@ let rec type_of (t : term) : (ty * si list) checker  =
     get_ctx_length >>= fun len ->
     return (type_of_prim pt, zeros len)
 
-  | TmPrimFun(i, s, ty, tmtylst) ->
+  | TmPrimFun(i, s, ty, ttslst) ->
     ty_debug (tmInfo t) "--> [%3d] Type checking primfun %s" !ty_seq s;
     si_simpl_ty ty >>= fun ty ->
-    mapM (fun (tm,ety) -> 
-      type_of tm >>= fun (aty, _) ->
+    mapM (fun (tm,ety,esi,_) -> 
+      type_of tm >>= fun (aty, asi) ->
       ty_debug (tmInfo t) "--> [%3d] %s Verifying that type %a is a subtype of type %a" !ty_seq s Print.pp_type aty Print.pp_type ety;
-      check_type_sub i ety aty) tmtylst >>
+      check_type_sub i aty ety >>
+      return (scale_sens esi asi)) ttslst >>= fun sislst ->
     get_ctx_length >>= fun len ->
-    return (ty, zeros len)
+    let sis = List.fold_left add_sens (zeros len) sislst in
+    return (ty, sis)
   
   | TmBag(i, ty, tmlst) -> 
     check_bag_shape i ty >>= fun ity ->
@@ -469,7 +494,7 @@ let rec type_of (t : term) : (ty * si list) checker  =
     type_of tm1 >>= fun (ty1, sis1) ->
     type_of tm2 >>= fun (ty2, sis2) ->
 
-    (* Checks that ty1 has shape !ᵢβ → α, and that ty2 is and instance of β.
+    (* Checks that ty1 has shape !ᵢβ → α, and that ty2 is an instance of β.
        Returns α and the sensitivity inside ty1 *)
     check_app i ty1 ty2 >>= fun (tya, r) ->
 
@@ -492,18 +517,14 @@ let rec type_of (t : term) : (ty * si list) checker  =
     return (ty_e, add_sens sis_e (scale_sens si_x sis_x))
 
   (* function x <args ...> : tya_x { tm_x }; e *)
-  | TmLetRec(i, x, tya_x, tm_x, e)                      ->
+  | TmRecFun(i, x, tya_x, tm_x, _)                      ->
 
     with_extended_ctx i x.b_name tya_x (type_of tm_x) >>= fun (ty_x, si_x, sis_x) ->
 
     check_type_sub i ty_x tya_x >>
 
-    with_extended_ctx i x.b_name tya_x (type_of e) >>= fun (ty_e, si_x', sis_e) ->
-
-    ty_debug i "### Type of binder %a is %a" Print.pp_binfo x Print.pp_type ty_x;
-    return (ty_e, add_sens sis_e (scale_sens (si_mult si_infty si_x') sis_x))  (* TODO: This is an instance of infinity times (potentially) zero *)
-
-  | TmInfCheck(i, tm) -> type_of tm
+(*    ty_debug i "### Type of binder %a is %a" Print.pp_binfo x Print.pp_type ty_x;*)
+    return (ty_x, sis_x)  (* TODO: Not sure if this is right *)
 
   (* sample b_x = tm_x; e *)
   | TmSample(i, b_x, tm_x, e)                              ->
@@ -544,8 +565,7 @@ let rec type_of (t : term) : (ty * si list) checker  =
 
     check_mu_shape i ty             >>= fun ty_unf ->
     type_of tm                      >>= fun (ty_tm, sis_tm) ->
-    check_type_sub i ty_unf ty_tm   >>
-    check_type_sub i ty_tm ty_unf   >>
+    check_type_equal i ty_unf ty_tm >>
     return (ty, sis_tm)
 
   | TmUnfold (i, tm)                ->
@@ -600,10 +620,9 @@ let rec type_of (t : term) : (ty * si list) checker  =
     
     (* TODO: Rather than check_type_sub in both directions, we want to find the 
              most general type of tyl and tyr and return that. *)
-    check_type_sub i tyr tyl >>
-    check_type_sub i tyl tyr >>
+    find_super_type i tyr tyl >>= fun tysup ->
 
-    return (tyl, add_sens (lub_sens sis_l sis_r) (scale_sens (si_lub si_x si_y) sis_e))
+    return (tysup, add_sens (lub_sens sis_l sis_r) (scale_sens (si_lub si_x si_y) sis_e))
 
   (* Type/Sensitivity Abstraction and Application *)
   | TmTyAbs(i, bi, tm) ->
@@ -625,13 +644,12 @@ let rec type_of (t : term) : (ty * si list) checker  =
     type_of thent >>= fun (tythen, sisthen) ->
     type_of elset >>= fun (tyelse, siselse) ->
     
-    check_type_sub i tythen tyelse >>
-    check_type_sub i tyelse tythen >>
+    find_super_type i tythen tyelse >>= fun tysup ->
     (match tyb with
       | TyPrim (PrimBool) -> return ()
       | _                 -> fail i @@ TypeMismatch (tyb, TyPrim (PrimBool))) >>
 
-    return (tythen, add_sens (lub_sens sisthen siselse) sisb)
+    return (tysup, add_sens (lub_sens sisthen siselse) sisb)
 
   ) >>= fun (ty, sis) ->
 

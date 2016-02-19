@@ -75,6 +75,8 @@ function generateDecisionTreeHelper
   (t : numtree)
   : numtree
   {
+    e = getEpsilon ();
+    print ("We have "^showNum e^"*ε budget remaining and have so far produced tree="^showTree@[int]@[bool] showInt showBool t);
     bools = cons@[bool] true (cons@[bool] false nil@[bool]);
     trees = listtobag@[numtree] (makeTrees@[int]@[bool] (listNums k) bools t);
     myfun = fun (x : num) : num { evalFun (bagsize@[numtree] trees) delta epsilon x };

@@ -13,3 +13,11 @@ let map f = function
 let default d = function
   | None   -> d
   | Some v -> v
+
+let map_default f d = function
+  | None   -> d
+  | Some v -> f v
+
+let is_some = function
+  | None   -> false
+  | Some _ -> true

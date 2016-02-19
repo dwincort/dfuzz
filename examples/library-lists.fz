@@ -19,12 +19,11 @@ function list_map forall(X, Y) (f : X -> Y) (lm : list(X)) : list(Y) {
 
 // lmap : (X -o Y) -> list(X) -o list(Y)
 function list_lmap forall (X, Y) (s : num) (f : X -o[[s]] Y) (l :[[s]] list(X)) : list(Y) {
-  g = f;
   function inner (lst :[[s]] list(X)) : list(Y) {
     case unfold lst of {
         inl(_) => nil@[Y]
       | inr(x) => let (h,t) = x;
-                  cons@[Y] (g h) (inner t)
+                  cons@[Y] (f h) (inner t)
     }
   }
   inner l
@@ -83,7 +82,6 @@ function uncons forall (A) (def :[] A) (lst :[] list(A)) : (A, list(A)) {
 }
 
 function performAt forall(A) (n :[] int) (f : A -o A) (l :[] list(A)) : list(A) {
-  g = f;
   function inner (n :[] (mu X => (() + X))) (l :[] list(A)) : list(A) {
     case unfold l of {
       inl(_)   => nil@[A]
@@ -99,7 +97,6 @@ function performAt forall(A) (n :[] int) (f : A -o A) (l :[] list(A)) : list(A) 
 
 
 function zipWithS forall(A,B,C) (sens : num) (f : A -o[[sens]] B -o[[sens]] C) (l1 :[[sens]] list(A)) (l2 :[[sens]] list(B)) : list(C) {
-  g = f;
   function inner (l1 :[[sens]] list(A)) (l2 :[[sens]] list(B)) : list(C) {
     case unfold l1 of {
       inl(x) => nil@[C]

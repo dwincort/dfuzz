@@ -71,10 +71,12 @@ let u_sym x = Symbols.string_of_symbol x
 (**********************************************************************)
 (* Helper functions for pretty printing *)
 
-let rec pp_list pp fmt l = match l with
-    []         -> fprintf fmt ""
-  | csx :: []  -> fprintf fmt "%a" pp csx
-  | csx :: csl -> fprintf fmt "%a,@ %a" pp csx (pp_list pp) csl
+let pp_list pp fmt l = 
+  let rec inner fmt l = match l with
+      []         -> fprintf fmt "]"
+    | csx :: []  -> fprintf fmt "%a]" pp csx
+    | csx :: csl -> fprintf fmt "%a,@ %a" pp csx inner csl
+  in fprintf fmt "[%a" inner l
 
 let pp_pair ppl ppr fmt pair = 
   let (l,r) = pair in fprintf fmt "(%a,@ %a)" ppl l ppr r
@@ -245,6 +247,10 @@ and pp_si_type ppf (si, ty) =
   else
     fprintf ppf ""
 
+and pp_ttslst ttslst = 
+  let pp ppf (tm,ty,si,_) = fprintf ppf "(%a :[%a] %a)" pp_term tm pp_si si pp_type ty in
+  pp_list pp ttslst
+
 (* let open_box n =  *)
 (*   print_string  *)
 (* Term pretty printing *)
@@ -253,10 +259,10 @@ and pp_term ppf t =
     TmVar(_, v)             -> fprintf ppf "%a" pp_vinfo v
   (* Primitive terms *)
   | TmPrim(_, pt)           -> fprintf ppf "%s" (string_of_term_prim pt)
-  | TmPrimFun(_, n, _, tmlst)   -> fprintf ppf "primitive function %s with args: [%a]" n (pp_list (pp_pair pp_term pp_type)) tmlst
+  | TmPrimFun(_, n, _, ttslst)  -> fprintf ppf "primfun %s with args: @[%a@]" n pp_ttslst ttslst
   
   (* Bags *)
-  | TmBag(_, ty, tmlst)         -> fprintf ppf "Bag[%a]{%a}" pp_type ty (pp_list pp_term) tmlst
+  | TmBag(_, ty, tmlst)         -> fprintf ppf "Bag[%a]& {%a}" pp_type ty (pp_list pp_term) tmlst
 
   (* Tensor and & *)
   | TmPair(_, tm1, tm2)               -> fprintf ppf "(@[%a@], @[%a@])" pp_term tm1 pp_term tm2
@@ -264,13 +270,13 @@ and pp_term ppf t =
   | TmTensDest(_, x, y, tm, term) -> fprintf ppf "@[<v>let (%a,%a) : = @[%a@];@,@[%a@]@]" pp_binfo x pp_binfo y pp_term tm pp_term term
   | TmAmpersand(_, tm1, tm2)          -> fprintf ppf "(|@[%a@], @[%a@]|)" pp_term tm1 pp_term tm2
 
-  | TmLeft (_, tm, ty)   -> fprintf ppf "Left[%a] @[%a@]"  pp_type ty pp_term tm
-  | TmRight(_, tm, ty)   -> fprintf ppf "Right[%a] @[%a@]" pp_type ty pp_term tm
+  | TmLeft (_, tm, ty)   -> fprintf ppf "Left@ @[<v>%a@]"  pp_term tm
+  | TmRight(_, tm, ty)   -> fprintf ppf "Right@ @[<v>%a@]" pp_term tm
   
   (* Data type manipulation *)
   | TmTypedef(_, n, ty, tm)    -> fprintf ppf "@[<v>typedef %a = %a;@,@[%a@]@]" pp_binfo n pp_type ty pp_term tm
-  | TmFold(_, ty, tm)          -> fprintf ppf "fold[%a]@, @[%a@]" pp_type ty pp_term tm
-  | TmUnfold(_, tm)            -> fprintf ppf "unfold @[%a@]" pp_term tm
+  | TmFold(_, ty, tm)          -> fprintf ppf "fold@ [@[<v>%a@]]@, @[%a@]" pp_type ty pp_term tm
+  | TmUnfold(_, tm)            -> fprintf ppf "unfold @[<v>%a@]" pp_term tm
 
   (* Regular Abstraction and Application *)
   | TmAbs(_, a_n, sity, r_ty, tm) ->
@@ -282,11 +288,9 @@ and pp_term ppf t =
   | TmLet(_, n, si, tm1, tm2) ->
     fprintf ppf "@[<v>@[<hov>%a @[:[%a]@] =@;<1 1>@[%a@]@];@,@[%a@]@]" pp_binfo n pp_si si pp_term tm1 pp_term tm2
 
-  | TmLetRec(_, n, r_ty, tm1, tm2) ->
-    fprintf ppf "@[<v>@[<hov>rec %a : @[%a@] =@;<1 1>@[%a@]@];@,@[%a@]@]" pp_binfo n pp_type r_ty pp_term tm1 pp_term tm2
+  | TmRecFun(_, n, r_ty, tm, _) ->
+    fprintf ppf "@[<v>@[<hov>rec %a : @[%a@] =@;<1 1>@[%a@]@]" pp_binfo n pp_type r_ty pp_term tm
   
-  | TmInfCheck(_, tm) -> fprintf ppf "%a" pp_term tm
-
   | TmSample(_, n, tm1, tm2) ->
     fprintf ppf "@[<v>@[<hov>sample %a@ =@;<1 1>@[%a@]@];@,@[%a@]@]" pp_binfo n pp_term tm1 pp_term tm2
 
@@ -303,7 +307,7 @@ and pp_term ppf t =
   | TmTyApp(_, tm, ty)     -> fprintf ppf "(%a@@[@[%a@]])" pp_term tm pp_type ty
 
   (* Convenience *)
-  | TmIfThenElse(_, b, thent, elset) -> fprintf ppf "if %a then %a else %a" pp_term b pp_term thent pp_term elset
+  | TmIfThenElse(_, b, thent, elset) -> fprintf ppf "if @[%a@]@ then@ @[%a@]@ else@ @[%a@]" pp_term b pp_term thent pp_term elset
 
 (* We print some applications in an special way, note that this relies on debug information *)
 and print_special_app ppf tm1 tm2 =

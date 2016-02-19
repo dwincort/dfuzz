@@ -27,9 +27,9 @@ module InterpMonad : sig
   
   val isInPartial : bool interpreter
   
-  val withRecTerm : term -> 'a interpreter -> 'a interpreter
+  val underBranchPartial : 'a interpreter -> 'a interpreter
   
-  val seenRecTerm : term -> bool interpreter
+  val isUnderBranchPartial : bool interpreter
   
   val attemptRedZone : epsilon -> bool interpreter
   
@@ -49,6 +49,8 @@ end
 open InterpMonad
 
 val interp : term -> term interpreter
+
+val goUnderLambda : term -> term interpreter
 
 val run_interp : term -> (string * primfun) list -> string
 

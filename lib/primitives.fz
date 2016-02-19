@@ -116,6 +116,19 @@ primitive runFuzz'
 primitive getDelta   (_ : ()) : delta   { "getDelta"   }
 primitive getEpsilon (_ : ()) : epsilon { "getEpsilon" }
 
+function assertTyCheck forall(DB,A)
+  (name : string)
+  (shouldpass : bool)
+  (sens : num)
+  (foo : DB -o[[sens]] A) 
+  : () {
+  res = tyCheckFuzz@[DB]@[A] sens foo;
+  case res of {
+    inl(s) => if shouldpass then { assertEq@[string] name s "Success" } else { assert name true }
+  | inr(_) => if shouldpass then { assert name true } else { assertEq@[string] name "Success" "Should Fail" }
+  }
+}
+
 ////////////////////////////////////////////////////////////////////////
 // Differential Privacy mechanisms:
 primitive add_noise

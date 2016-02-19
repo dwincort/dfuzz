@@ -70,7 +70,7 @@ function stagewiseRed
   (threshold : num)
   (beta : nlist)
   (db :[[eps]] db)
-  : fuzzy clist {
+  : fuzzy nlist {
     // We need a list of zeros to begin accumulating the values we need
     len = length@[num] beta;
     //zeros = list_map@[num]@[num] (fun (x : num) : num { 0.0 }) beta;

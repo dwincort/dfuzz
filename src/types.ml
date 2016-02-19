@@ -106,7 +106,9 @@ and  term =
      to make the type (info * string * ty * term list * primfun) and have the string be entirely for 
      debug purposes. This will involve passing the primfun list to the parser instead 
      of the interpreter and having the parser look up the strings directly. *)
-  | TmPrimFun   of info * string * ty * (term * ty) list
+  | TmPrimFun   of info * string * ty * (term * ty * si * bool) list
+  
+  | TmRecFun    of info * binder_info * ty * term * bool
   
   (* Note that the type in the TmBag is the type of the whole bag, NOT just the type of the contents. *)
   | TmBag       of info * ty * term list
@@ -129,8 +131,6 @@ and  term =
 
   (* Bindings *)
   | TmLet      of info * binder_info * si * term * term
-  | TmLetRec   of info * binder_info * ty * term * term
-  | TmInfCheck of info * term
   | TmSample   of info * binder_info * term * term
 
   (* Type Abstraction and Applicacion *)
@@ -151,8 +151,7 @@ and  primfun = PrimFun of (ty * term list -> term interpreter)
 (* TODO: The primfun list should be handled by the parser *)
 and  'a interpreter = 
     (((term * epsilon * epsilon list) option)   (* The database, its budget, and the list of red zone computation sensitivities performed so far. *)
-    * bool                      (* Represents whether we are in partial evaluation mode or not. *)
-    * (term list)               (* Represents the recursive functions we have already expanded (to prevent infinite loops. *)
+    * (context * bool) option             (* Represents whether we are in partial evaluation mode or not, and if we are under an unknown branch *)
     * (string * primfun) list)  (* The primfun map is the initial set of primitive function implementations. *)
    -> ((term * epsilon * epsilon list) option   (* The database, its budget, and the list of red zone computation sensitivities as output. *)
     * ('a, string) result)      (* the output is either an Ok value or an error with a string. *)

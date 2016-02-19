@@ -77,12 +77,17 @@ let mkNewVarsInType ty ctx =
   let f k i v = TmVar(i, var_shift 0 k (existing_var i v.v_name ctx)) in
   ty_mapTm f 0 ty
 
+let mkNewVarsInSi si ctx = 
+  let f k i v = TmVar(i, var_shift 0 k (existing_var i v.v_name ctx)) in
+  si_mapTm f 0 si
+
 (* When we're making this list for primFuns, the type may have terms in it (e.g. 
    SiTerms).  They must be appropriately indexed, so we remake them with the 
    current (potentially extended) context.  We do this with mkNewVarsInType. *)
 let rec args_to_args_list fi arg_list ctx = match arg_list with
   | []      -> []
-  | (ty, si, n, i) :: arg_list' -> (TmVar(fi, existing_var fi n ctx), mkNewVarsInType ty ctx) :: args_to_args_list fi arg_list' ctx
+  | (ty, si, n, i) :: arg_list' -> (TmVar(fi, existing_var fi n ctx), mkNewVarsInType ty ctx, mkNewVarsInSi si ctx, false) 
+                                 :: args_to_args_list fi arg_list' ctx
 
 let mk_infix ctx info op t1 t2 =
   match Ctx.lookup_var op ctx with
@@ -261,11 +266,11 @@ Term :
         let ctx_let          = extend_var $2.v ctx        in
         let (qf,   ctx_qf)   = $3 ctx_let                 in
         let (args, ctx_args) = $4 ctx_qf                  in
-(*        let body             = TmInfCheck ($2.i, $8 ctx_args)          in*)
         let f_type           = from_args_to_type qf args ($6 ctx_args) in
         let f_term           = from_args_to_term qf args ($8 ctx_args) in
+        let recfun           = TmRecFun ($2.i, nb_var $2.v, f_type, f_term, false) in
 
-        TmLetRec($2.i, nb_var $2.v, f_type, f_term, $10 ctx_let)
+        TmLet($2.i, nb_var $2.v, si_infty, recfun, $10 ctx_let)
       }
   | LogOrTerm
       { $1 }
