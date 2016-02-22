@@ -1,0 +1,42 @@
+
+TODO created 2/22/2016
+This file contains notes about bugs and feature requests in this staged Fuzz system.
+
+
+BUGS:
+- 2/22/2016
+    In certain cases, there can be unevaluated terms in a bag.  I'm not entirely sure how this can happen, but if one rewrites 
+    expMechFun in terms of expMechFunOnePass (as I have done, but is commented out, in library-bags), then the program will 
+    error out due to this.  It could be easily fixed by forcing interpretation of the elements of a bag during interp whenever 
+    a bag is encountered, but this may be detrimental to performance.  It may be worth discovering why this is happening in 
+    the first place.  Notable chunks of code: expMechOnePassFun definition in Prim (particularly the call to exNum); 
+    interpreter.interp (particularly the cases for TmPrimFun and TmBag).
+
+
+Feature Requests:
+- 2/22/2016
+    When primitive functions are interpreted, they can create new terms (e.g. result terms).  However, the current implementation 
+    does not carry file info into primfun interpretation, so the terms are all lacking this data.  The interpretation of primfun 
+    should be updated to take a fileinfo as an argument so that produced data and error messages are better.  This will affect 
+    types, interpreter, and prim (and likely some other files as a side effect).
+- 2/22/2016
+    Primitive function definitions are put into the program during the interpretation phase (Interpreter.lookup_prim).  This means 
+    that prior to this, primfuns are reliant upon a simple string to differentiate them from each other.  Really, this string 
+    should only be for debug purposes.  To fix this, I anticipate passing the primfun list to the parser and having the syntax 
+    tree be constructed with primfuns directly.  This will likely affect types, parser, and interpreter (and likely some other 
+    files as a side effect).
+- 2/22/2016
+    There are two monads used in this codebase, the checker monad for type checking and the interpreter monad for interpreting.  
+    They are quite similar, but there is no monad module to allow sharing of similar functions (e.g. mapM, mapMSi, mapMTy, etc.).  
+    This seems silly and rectifiable, but I don't quite know how to do it in ocaml.
+- 2/22/2016
+    Currently, there is no syntax support for multiplication or division of integers.  That is, one can use .+ and .- for 
+    integral addition and subtraction, but one cannot use .* or ./ for multiplication or division.  This will affect 
+    parser and likely little else.
+- 2/22/2016
+    Currently, there is one "primitives" fuzz module in lib, and there are multiple lib-*** fuzz modules in examples.  The 
+    primitives module should be (and is) included by default, but the lib modules are not.  The lib-bags module should probably 
+    be included by default (as it has a number of actual primitive functions in it), but at the very least, the lib-*** files 
+    should be moved to the lib directory, and any "includes" should automatically include the lib directory in the path of 
+    files searched.
+

@@ -132,6 +132,9 @@ let rec tm_map
   | TmLet(i, bi,             si,             tm,                 tm_i)  ->
     TmLet(i, bi, fsi ntm nty si, ftm ntm nty tm, ftm (ntm+1) nty tm_i)
   
+  | TmStmt(i,             tm1,             tm2)  ->
+    TmStmt(i, ftm ntm nty tm1, ftm ntm nty tm2)
+  
   | TmSample(i, bi,             tm,                 tm_i) ->
     TmSample(i, bi, ftm ntm nty tm, ftm (ntm+1) nty tm_i)
   
@@ -301,6 +304,8 @@ let rec tmEq (t1 : term) (t2 : term) : bool =
     TmUnfold(_, tm2) -> tmEq tm1 tm2
   | TmLet(_, _, si1, t1a, t1b),
     TmLet(_, _, si2, t2a, t2b) -> siEq si1 si2 && tmEq t1a t2a && tmEq t1b t2b
+  | TmStmt(_, t1a, t1b),
+    TmStmt(_, t2a, t2b) -> tmEq t1a t2a && tmEq t1b t2b
   | TmRecFun(_, _, ty1, t1, b1),
     TmRecFun(_, _, ty2, t2, b2) -> tyEq ty1 ty2 && tmEq t1 t2 && (b1 = b2)
   | TmSample(_, _, t1a, t1b),
@@ -402,6 +407,7 @@ let tmInfo t = match t with
 
   (* Bindings *)
   | TmLet(fi,_,_,_,_)           -> fi
+  | TmStmt(fi,_,_)              -> fi
   | TmRecFun(fi,_,_,_,_)        -> fi
   | TmSample(fi,_,_,_)          -> fi
 

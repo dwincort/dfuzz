@@ -382,7 +382,7 @@ let bagsplitFun
 let addNoiseFun
   (eps : float)
   (n : float)
-  : float = n +. Math.lap eps
+  : float = n +. Math.lap (1.0 /. eps)
 
 
 (* expMechFun : num[e] -> (R -> DB -o fuzzy num) -> R bag -> DB -o[e] fuzzy R *)
@@ -475,6 +475,7 @@ let listFromFileFun
 let listbagFromFileFun
   (oty : ty)
   (fn : string)
+  (rexp : string)
   : (ty * term list) interpreter = 
     let lines = fileLines fn in
     (match oty with
@@ -483,7 +484,7 @@ let listbagFromFileFun
     ) >>= fun subty ->
     typeToMaker di subty >>= fun wordFun ->
     let lineFun line = List.fold_right (fun v fzlst -> TmFold (di, oty, TmRight (di, TmPair (di, v, fzlst), TyPrim PrimUnit)))
-                            (List.map wordFun (Str.split (Str.regexp "[ \t]+") line))
+                            (List.map wordFun (Str.split (Str.regexp rexp) line))  (*"[ \t]+"*)
                             (TmFold (di, oty, TmLeft (di, TmPrim (di, PrimTUnit), subty)))
     in return (oty, List.map lineFun lines)
 
@@ -592,7 +593,7 @@ let prim_list : (string * primfun) list = [
 (* Load data from external file *)
 ("bagFromFile",  fun_of_1arg_with_type_i "bagFromFile"  exString mkBag bagFromFileFun);
 ("listFromFile", fun_of_1arg_with_type_i "listFromFile" exString mkAny listFromFileFun);
-("listbagFromFile", fun_of_1arg_with_type_i "listbagFromFile" exString mkBag listbagFromFileFun);
+("listbagFromFile", fun_of_2args_with_type_i "listbagFromFile" exString exString mkBag listbagFromFileFun);
 
 ]
 

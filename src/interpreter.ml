@@ -201,12 +201,9 @@ let rec interp t =
      case, we fail, but we deeply evaluate (go under lambdas) the arguments 
      to make sure all function arguments are partially evaluated. *)
   | TmPrimFun(i, s, ty, ttslst)  ->
-      (* FIXME: I'm not sure this first pass of interp-ing the arguments is necessary. *)
       mapM (fun (tm,ty,si,b) -> interp tm >>= fun tm -> 
-                                mapMTy interp ty >>= fun ty -> 
-                                mapMSi interp si >>= fun si ->
                                 return (tm,ty,si,b)) ttslst >>= fun ttslst ->
-      let tmlst = List.map (fun (tm,ty,si,_) -> tm) ttslst in
+      let tmlst = List.map (fun (tm,_,_,_) -> tm) ttslst in
       if List.for_all tmIsVal tmlst then
         lookup_prim s >>= fun f -> 
         f (ty, tmlst)
@@ -214,7 +211,10 @@ let rec interp t =
         isInPartial >>= fun partial ->
         if partial then
           mapM (fun (tm,ty,si,b) -> if b then return (tm,ty,si,b)
-                                    else (goDeepUnderLambda tm >>= fun tm -> return (tm,ty,si,true))
+                                    else (goDeepUnderLambda tm >>= fun tm -> 
+                                          mapMTy interp ty >>= fun ty -> 
+                                          mapMSi interp si >>= fun si ->
+                                          return (tm,ty,si,true))
           ) ttslst >>= fun ttslst ->
           return @@ TmPrimFun(i, s, ty, ttslst)
         else fail @@ pp_to_string "**Interpreter** " "Unevaluated arguments in %a." pp_term t
@@ -223,6 +223,9 @@ let rec interp t =
   | TmVar(i,v) -> fail @@ "**Interpreter** Unexpected var: "^v.v_name
   
   (* Bags are essentially primitives. *)
+  (* There are certain cases where bags can have unevaluated terms in them.  Realistically, 
+     this should be addressed so that it cannot happen, but an easy (although expensive 
+     performance-wise) fix would be to interp each element of a bag whenever we see one. *)
   | TmBag(_,_,_) -> return t
   
   (* Pairs.  Interpret both parts and return them as a pair. *)
@@ -344,6 +347,17 @@ let rec interp t =
   | TmLet(i, b, si, tm, tBody) ->
       interp tm >>= fun tm -> 
       interp (tm_substTm tm 0 0 tBody)
+  
+  (* Statement bodies can be evaluated during partial evaluation, but the
+     statement itself should not be removed. *)
+  | TmStmt(i, tm1, tm2) ->
+      interp tm1 >>= fun tm1 -> 
+      interp tm2 >>= fun tm2 ->
+      isInPartial >>= fun partial ->
+      if partial then
+        return @@ TmStmt(i, tm1, tm2)
+      else
+        return tm2
   
   (* A recursive function should always be expanded except if we are in 
      the case where we are both in under-branch mode and this is a 

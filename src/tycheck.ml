@@ -299,7 +299,7 @@ module TypeSub = struct
     let rec inner (ty_1 : ty) (ty_2 : ty) : unit checker =
       match ty_1, ty_2 with
       | TyVar v1, TyVar v2   ->
-        if v1 = v2 then return () else fail
+        if v1.v_index = v2.v_index then return () else fail
   
       | TyPrim p1, TyPrim p2 -> if check_prim_sub p1 p2 then return () else fail
   
@@ -455,11 +455,11 @@ let rec type_of (t : term) : (ty * si list) checker  =
     return (type_of_prim pt, zeros len)
 
   | TmPrimFun(i, s, ty, ttslst) ->
-    ty_debug (tmInfo t) "--> [%3d] Type checking primfun %s" !ty_seq s;
+    ty_debug i "--> [%3d] Type checking primfun %s" !ty_seq s;
     si_simpl_ty ty >>= fun ty ->
     mapM (fun (tm,ety,esi,_) -> 
       type_of tm >>= fun (aty, asi) ->
-      ty_debug (tmInfo t) "--> [%3d] %s Verifying that type %a is a subtype of type %a" !ty_seq s Print.pp_type aty Print.pp_type ety;
+      ty_debug i "--> [%3d] %s Verifying that type %a is a subtype of type %a" !ty_seq s Print.pp_type aty Print.pp_type ety;
       check_type_sub i aty ety >>
       return (scale_sens esi asi)) ttslst >>= fun sislst ->
     get_ctx_length >>= fun len ->
@@ -482,7 +482,7 @@ let rec type_of (t : term) : (ty * si list) checker  =
     si_simpl sia_x                                    >>= fun sia_x ->
     with_extended_ctx i b_x.b_name tya_x (type_of tm) >>= fun (ty_tm, si_x, sis) ->
 
-    reportSensitivity 4 (tmInfo t) b_x si_x >>= fun si_x ->
+    reportSensitivity 4 i b_x si_x >>= fun si_x ->
 
     check_type_ann i otya_tm ty_tm                  >>
     check_sens_leq i si_x sia_x                     >>
@@ -512,9 +512,19 @@ let rec type_of (t : term) : (ty * si list) checker  =
     ty_debug i "### Type of binder %a is %a" Print.pp_binfo x Print.pp_type ty_x;
 
     with_extended_ctx i x.b_name ty_x (type_of e) >>= fun (ty_e, si_x, sis_e) ->
-    reportSensitivity 4 (tmInfo t) x si_x         >>= fun si_x ->
+    reportSensitivity 4 i x si_x         >>= fun si_x ->
     check_sens_leq i si_x sia_x                   >>
     return (ty_e, add_sens sis_e (scale_sens si_x sis_x))
+
+  (* Identical to let being used precisely once, this rule exists in order to 
+     simplify assert statements. *)
+  (* tm1; tm2 *)
+  | TmStmt(i, tm1, tm2) ->
+
+    type_of tm1 >>= fun (_ty, sis_1)  ->
+    type_of tm2 >>= fun (ty,  sis_2)  ->
+
+    return (ty, add_sens sis_1 sis_2)
 
   (* function x <args ...> : tya_x { tm_x }; e *)
   | TmRecFun(i, x, tya_x, tm_x, _)                      ->
@@ -534,8 +544,8 @@ let rec type_of (t : term) : (ty * si list) checker  =
 
     with_extended_ctx i b_x.b_name ty_x (type_of e) >>= fun (ty_e, si_x, sis_e) ->
 
-(*     ty_debug (tmInfo t) "### [%3d] Sample for binder @[%a@] with sens @[%a@]" !ty_seq P.pp_binfo b_x P.pp_si si_x; *)
-    reportSensitivity 4 (tmInfo t) b_x si_x >>= fun si_x ->
+(*     ty_debug i "### [%3d] Sample for binder @[%a@] with sens @[%a@]" !ty_seq P.pp_binfo b_x P.pp_si si_x; *)
+    reportSensitivity 4 i b_x si_x >>= fun si_x ->
 
     check_fuzz_shape i ty_e                         >>
 
@@ -592,8 +602,8 @@ let rec type_of (t : term) : (ty * si list) checker  =
     (* Extend context with x and y *)
     with_extended_ctx_2 i x.b_name ty_x y.b_name ty_y (type_of t) >>= fun (ty_t, si_x, si_y, sis_t) ->
 
-    reportSensitivity 4 (tmInfo t) x si_x   >>= fun si_x ->
-    reportSensitivity 4 (tmInfo t) y si_y   >>= fun si_y ->
+    reportSensitivity 4 i x si_x   >>= fun si_x ->
+    reportSensitivity 4 i y si_y   >>= fun si_y ->
 
     return (ty_t, add_sens sis_t (scale_sens (si_lub si_x si_y) sis_e))
   
@@ -615,8 +625,8 @@ let rec type_of (t : term) : (ty * si list) checker  =
     with_extended_ctx i b_x.b_name ty1 (type_of e_l) >>= fun (tyl, si_x, sis_l) ->
     with_extended_ctx i b_y.b_name ty2 (type_of e_r) >>= fun (tyr, si_y, sis_r) ->
     
-    reportSensitivity 4 (tmInfo t) b_x si_x          >>= fun si_x ->
-    reportSensitivity 4 (tmInfo t) b_y si_y          >>= fun si_y ->
+    reportSensitivity 4 i b_x si_x          >>= fun si_x ->
+    reportSensitivity 4 i b_y si_y          >>= fun si_y ->
     
     (* TODO: Rather than check_type_sub in both directions, we want to find the 
              most general type of tyl and tyr and return that. *)

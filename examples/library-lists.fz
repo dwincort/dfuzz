@@ -17,6 +17,15 @@ function list_map forall(X, Y) (f : X -> Y) (lm : list(X)) : list(Y) {
   }
 }
 
+// // lmap : (X -o Y) -> list(X) -o list(Y)
+// function list_lmap forall (X, Y) (s : num) (f : X -o[[s]] Y) (l :[[s]] list(X)) : list(Y) {
+//   case unfold l of {
+//       inl(_) => nil@[Y]
+//     | inr(x) => let (h,t) = x;
+//                 cons@[Y] (f h) (list_lmap@[X]@[Y] s f t)
+//   }
+// }
+
 // lmap : (X -o Y) -> list(X) -o list(Y)
 function list_lmap forall (X, Y) (s : num) (f : X -o[[s]] Y) (l :[[s]] list(X)) : list(Y) {
   function inner (lst :[[s]] list(X)) : list(Y) {
@@ -97,10 +106,10 @@ function performAt forall(A) (n :[] int) (f : A -o A) (l :[] list(A)) : list(A) 
 
 
 function zipWithS forall(A,B,C) (sens : num) (f : A -o[[sens]] B -o[[sens]] C) (l1 :[[sens]] list(A)) (l2 :[[sens]] list(B)) : list(C) {
-  function inner (l1 :[[sens]] list(A)) (l2 :[[sens]] list(B)) : list(C) {
-    case unfold l1 of {
+  function inner (l1i :[[sens]] list(A)) (l2i :[[sens]] list(B)) : list(C) {
+    case unfold l1i of {
       inl(x) => nil@[C]
-    | inr(x) => case unfold l2 of {
+    | inr(x) => case unfold l2i of {
                   inl(y) => nil@[C]
                 | inr(y) => let (xh,xt) = x; let (yh,yt) = y;
                             cons@[C] (f xh yh) (inner xt yt)
@@ -189,6 +198,20 @@ function index
     }
 }
 
+function take
+  forall(A)
+  (ind : int)
+  (lst :[] list(A))
+  : list(A) {
+    if (ind == 0) then { nil@[A] } else {
+      case (unfold lst) of {
+        inl(_)   => nil@[A]
+      | inr(xxs) => let (x,xs) = xxs;
+                    cons x (take@[A] (ind .- 1) xs)
+      }
+    }
+}
+
 function vectorMap
   forall(A,B)
   (s : num)
@@ -243,15 +266,15 @@ function vectorMap
 #define fnil(A)      (fold[flist(A)] (inl{()}))
 #define fcons(A,a,b) (fold[flist(A)] (inr{(a, b)}))
 
-// listfuzz : flist(num) -o fuzzy list(num) [like mapM]
-function listfuzz (fl :[] flist(num)) : fuzzy list(num) {
+// listfuzz : flist(A) -o fuzzy list(A) [like mapM]
+function listfuzz forall(A) (fl :[] flist(A)) : fuzzy list(A) {
   case unfold fl of {
-      inl(x) => return nil@[num]
-    | inr(x) =>
-        let (lhead, ltail) = x;
+      inl(_) => return nil@[A]
+    | inr(ht) =>
+        let (lhead, ltail) = ht;
         sample y = lhead;
-        sample tailsample = listfuzz ltail;
-        return (cons@[num] y (tailsample))
+        sample tailsample = listfuzz@[A] ltail;
+        return (cons@[A] y tailsample)
   }
 }
 

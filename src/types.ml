@@ -131,6 +131,7 @@ and  term =
 
   (* Bindings *)
   | TmLet      of info * binder_info * si * term * term
+  | TmStmt     of info * term * term
   | TmSample   of info * binder_info * term * term
 
   (* Type Abstraction and Applicacion *)

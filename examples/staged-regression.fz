@@ -56,10 +56,13 @@ function rowop
   : clist {
     let (y,rlst) = row;
     mew = innerProdFC beta rlst;
+    // -betanorm <= -mew <= betanorm
+    // 0 <= -mew + betanorm <= 2*betanorm
+    // 0 <= y + -mew + betanorm <= 2*betanorm + 1
     betanorm = absum beta;
     list_map@[clipped]@[clipped] (fun (x : clipped) : clipped { 
         temp = (fromClip y - mew + betanorm) * (fromClip x);
-        clip (temp / (betanorm + 1))
+        clip (temp / (2*betanorm + 1))
     }) rlst
 }
   
@@ -71,10 +74,7 @@ function stagewiseRed
   (beta : nlist)
   (db :[[eps]] db)
   : fuzzy nlist {
-    // We need a list of zeros to begin accumulating the values we need
     len = length@[num] beta;
-    //zeros = list_map@[num]@[num] (fun (x : num) : num { 0.0 }) beta;
-    zeros = replicate@[num] 0.0 len;
     betanorm = absum beta;
     eps' = eps * 4 * (betanorm + 1);
     // This function f will be what we pass to the exponential mechanism
@@ -82,24 +82,24 @@ function stagewiseRed
       // Get the average value of each column.  Start by summing them.
       sumVals = bagsumL len (bagmap@[(clipped, clist)]@[clist] (fun (ccs : (clipped, clist)) {let (_,cs) = ccs; cs}) db);
       // The main operation is a map then sum over the database using the above "rowop" function
-      res = bagsumL len (bagmap@[(clipped, clist)]@[clist] (rowop beta) db);
+      res1 = bagsumL len (bagmap@[(clipped, clist)]@[clist] (rowop beta) db);
       // The above result was shifted to make sure all values would be between 0 and 1.
       // We do a (|beta|+1)-sensitive operation to unshift and extract the results.
-      res = zipWithS@[num]@[num]@[num] (betanorm + 1) 
+      res2 = zipWithS@[num]@[num]@[num] (betanorm + 1) 
               (fun (v :[[betanorm + 1]] num) { fun (c :[[betanorm + 1]] num) {
-                (scale (betanorm + 1) v) - (scale betanorm c)}}) res sumVals;
+                (scale (betanorm + 1) v) - (scale betanorm c)}}) res1 sumVals;
       // The result of the fold is the current correlation vector c.  We pair each value with its index.
-      res = pairWithCount@[num] 0 res;
+      res3 = pairWithCount@[num] 0 res2;
       // We massage the data into a proper form for the expMechOnePass function.
       // Unfortunately, this is 2-sensitive because we need to use the value both 
       // as a score for the exponential mechanism as well as a result to check its sign.
       // TODO: Is there a way to reduce the sensitivity because we know that we'll only be using 
       // the sign of the value?
-      res = list_lmap@[(int,num)]@[((int,num),num)] 2 (fun (xy :[2] (int,num)) : ((int,num),num) { let (i,n) = xy; ((i,n),op_abs n) }) res;
+      res4 = list_lmap@[(int,num)]@[((int,num),num)] 2 (fun (xy :[2] (int,num)) : ((int,num),num) { let (i,n) = xy; ((i,n),op_abs n) }) res3;
       // Convert the result to a bag and add the threshold value
-      res = addtobag@[((int,num),num)] ((0 .- 1,threshold), threshold) (listtobag@[((int,num),num)] res);
+      res5 = addtobag@[((int,num),num)] ((0 .- 1,threshold), threshold) (listtobag@[((int,num),num)] res4);
       // return it in the probability monad.
-      res };
+      res5 };
     // Run the exponential mechanism.
     sample jcj = expMechOnePass@[(int,num)]@[db] eps' f db;
     // The result is both the index j and the value of c at j.
@@ -108,7 +108,7 @@ function stagewiseRed
       return beta
     } else {
       signedconstant = if cj > 0 then { smallconstant } else { 0 - smallconstant };
-      return (performAt@[num] j (op_add signedconstant) beta)
+      return@[nlist] (performAt@[num] j (op_add signedconstant) beta)
     }
 }
 
@@ -133,7 +133,7 @@ function stagewiseGreen
 
 
 
-db = (db = listbagFromFile@[num] "examples/data/baglist2.dat";
+db = (db = listbagFromFile@[num] "examples/data/baglist2.dat" "[ \\t]+";
       db = bagmap@[nlist]@[clist]
             (fun (l : nlist) : clist {
               list_map@[num]@[clipped] (fun (x : num) : clipped { clip (x / 10.0) }) l}) db;

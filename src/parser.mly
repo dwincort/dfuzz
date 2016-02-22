@@ -222,9 +222,7 @@ PrimSpec :
 Term :
     Expr SEMI Term
       {
-        fun ctx ->
-          let ctx' = extend_var "__seq" ctx in
-          TmLet($2, (nb_var "__seq"), si_infty, $1 ctx, $3 ctx')
+        fun ctx -> TmStmt($2, $1 ctx, $3 ctx)
       }
   | ID SensAnn EQUAL Expr SEMI Term
       {

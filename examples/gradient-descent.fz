@@ -1,0 +1,118 @@
+
+
+// Include the bags libraries (lists is included with this).
+#include "library-bags.fz"
+
+/*
+A database row is a list of clipped nums.  The 0-indexed value is 
+the label, and the parameters are indexed 1 through k.
+*/
+
+
+
+typedef nlist = list(num);
+typedef clist = list(clipped);
+typedef db = (clipped, clist) bag;
+
+absum = fun (l : list(num)) : num { list_lfoldl@[num]@[num] (fun (accum :[] num) { fun (x :[] num ) { accum + (op_abs x) } }) 0 l };
+
+
+function replicate forall(A) (x : A) (n : int) : list(A) {
+  if n <= 0 then { nil@[A] } else { cons@[A] x (replicate@[A] x (n .- 1)) }
+}
+
+
+// Inner Product with a Fixed length and a Constant first list
+function innerProdFC
+  (v1 : list(num))
+  (v2 :[[absum v1]] list(num))
+  : num {
+    case unfold v1 of {
+      inl(_) => 0.0
+    | inr(nns) => let (n,ns) = nns;
+                  let (c,cs) = uncons@[num] 0.0 v2;
+                  (scale n c) + (innerProdFC ns cs)
+    }
+}
+
+      
+function rowop
+  (theta : nlist)
+  (row : (clipped, clist))
+  : clist {
+    let (y,rlst) = row;
+    mew = innerProdFC theta rlst;
+    // -thetanorm <= -mew <= thetanorm
+    // 0 <= -mew + thetanorm <= 2*thetanorm
+    // 0 <= y + -mew + thetanorm <= 2*thetanorm + 1
+    thetanorm = absum theta;
+    list_map@[clipped]@[clipped] (fun (x : clipped) : clipped { 
+        temp = (fromClip y - mew + thetanorm) * (fromClip x);
+        clip (temp / (2*thetanorm + 1))
+    }) rlst
+}
+  
+function gdRed
+  (eps : num)
+  (dbSize : int)
+  (theta : nlist)
+  (db :[[eps]] db)
+  : fuzzy nlist {
+    len = length@[num] theta;
+    thetanorm = absum theta;
+    eps' = eps / (4 * (thetanorm + 1));
+    
+    // Get sum of each column.
+    sumVals = bagsumL len (bagmap@[(clipped, clist)]@[clist] (fun (ccs : (clipped, clist)) {let (_,cs) = ccs; cs}) db);
+    // The main operation is a map then sum over the database using the above "rowop" function
+    res1 = bagsumL len (bagmap@[(clipped, clist)]@[clist] (rowop theta) db);
+    // The above result was shifted to make sure all values would be between 0 and 1.
+    // We do a (|theta|+1)-sensitive operation to unshift and extract the results.
+    res2 = zipWithS@[num]@[num]@[num] (2*thetanorm + 1) 
+            (fun (v :[[2*thetanorm + 1]] num) { fun (c :[[2*thetanorm + 1]] num) {
+              (scale thetanorm c) - (scale (2*thetanorm + 1) v)}}) res1 sumVals;
+    // The result of this zip is the exact new correlation vector theta.
+    // We need to add noise to each element so that we can return it.
+    res3 = list_lmap@[num]@[fuzzy num] eps' (add_noise eps') res2;
+    sample res4 = listfuzz@[num] res3;
+    res5 = list_map@[num]@[num] (clip_scale (clip 0.1)) res4;
+    return (zipWith@[num]@[num]@[num] op_sub theta res5)
+    
+}
+
+function gdGreen
+  (eps : num)
+  (dbSize : int)
+  (theta : nlist)
+  (numIters : int)
+  : string {
+    e = getEpsilon ();
+    print ("We have "^showNum e^"*ε budget remaining and have so far produced theta="^showList@[num] showNum theta);
+    if (numIters <= 0) then {
+      showList@[num] showNum theta
+    } else {
+      rz = runFuzz'@[db]@[nlist] eps (gdRed eps dbSize theta);
+      case rz of {
+        inl(s) => s
+      | inr(theta') => gdGreen eps dbSize theta' (numIters .- 1)
+      }
+    }
+}
+
+
+
+
+db = (db = listbagFromFile@[num] "examples/data/baglist2.dat" "[ \\t]+";
+      db = bagmap@[nlist]@[clist]
+            (fun (l : nlist) : clist {
+              list_map@[num]@[clipped] (fun (x : num) : clipped { clip (x / 10.0) }) l}) db;
+      bagmap@[clist]@[(clipped,clist)] (uncons (clip 0.0)) db);
+
+
+// WHITE ZONE
+loadDB@[db] db 500;
+dbSize = bagsize@[(clipped,clist)] db;
+gdGreen 10 dbSize (replicate@[num] 0.0 3) 30
+
+
+

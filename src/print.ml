@@ -259,13 +259,13 @@ and pp_term ppf t =
     TmVar(_, v)             -> fprintf ppf "%a" pp_vinfo v
   (* Primitive terms *)
   | TmPrim(_, pt)           -> fprintf ppf "%s" (string_of_term_prim pt)
-  | TmPrimFun(_, n, _, ttslst)  -> fprintf ppf "primfun %s with args: @[%a@]" n pp_ttslst ttslst
+  | TmPrimFun(_, n, _, ttslst)  -> fprintf ppf "primfun %s with args:@ @[%a@]" n pp_ttslst ttslst
   
   (* Bags *)
-  | TmBag(_, ty, tmlst)         -> fprintf ppf "Bag[%a]& {%a}" pp_type ty (pp_list pp_term) tmlst
+  | TmBag(_, ty, tmlst)         -> fprintf ppf "Bag[%a]@ {%a}" pp_type ty (pp_list pp_term) tmlst
 
   (* Tensor and & *)
-  | TmPair(_, tm1, tm2)               -> fprintf ppf "(@[%a@], @[%a@])" pp_term tm1 pp_term tm2
+  | TmPair(_, tm1, tm2)               -> fprintf ppf "(@[%a@],@ @[%a@])" pp_term tm1 pp_term tm2
   (* | TmTensDest(_, x, y, si, tm, term) -> fprintf ppf "@[<v>let (%a,%a) :[%a] = @[%a@];@,@[%a@]@]" pp_binfo x pp_binfo y pp_si si pp_term tm pp_term term *)
   | TmTensDest(_, x, y, tm, term) -> fprintf ppf "@[<v>let (%a,%a) : = @[%a@];@,@[%a@]@]" pp_binfo x pp_binfo y pp_term tm pp_term term
   | TmAmpersand(_, tm1, tm2)          -> fprintf ppf "(|@[%a@], @[%a@]|)" pp_term tm1 pp_term tm2
@@ -287,6 +287,9 @@ and pp_term ppf t =
 
   | TmLet(_, n, si, tm1, tm2) ->
     fprintf ppf "@[<v>@[<hov>%a @[:[%a]@] =@;<1 1>@[%a@]@];@,@[%a@]@]" pp_binfo n pp_si si pp_term tm1 pp_term tm2
+
+  | TmStmt(_, tm1, tm2) ->
+    fprintf ppf "@[%a@];@,@[%a@]" pp_term tm1 pp_term tm2
 
   | TmRecFun(_, n, r_ty, tm, _) ->
     fprintf ppf "@[<v>@[<hov>rec %a : @[%a@] =@;<1 1>@[%a@]@]" pp_binfo n pp_type r_ty pp_term tm
