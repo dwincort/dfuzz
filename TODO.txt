@@ -4,13 +4,7 @@ This file contains notes about bugs and feature requests in this staged Fuzz sys
 
 
 BUGS:
-- 2/22/2016
-    In certain cases, there can be unevaluated terms in a bag.  I'm not entirely sure how this can happen, but if one rewrites 
-    expMechFun in terms of expMechFunOnePass (as I have done, but is commented out, in library-bags), then the program will 
-    error out due to this.  It could be easily fixed by forcing interpretation of the elements of a bag during interp whenever 
-    a bag is encountered, but this may be detrimental to performance.  It may be worth discovering why this is happening in 
-    the first place.  Notable chunks of code: expMechOnePassFun definition in Prim (particularly the call to exNum); 
-    interpreter.interp (particularly the cases for TmPrimFun and TmBag).
+No known bugs.
 
 
 Feature Requests:
@@ -39,4 +33,37 @@ Feature Requests:
     be included by default (as it has a number of actual primitive functions in it), but at the very least, the lib-*** files 
     should be moved to the lib directory, and any "includes" should automatically include the lib directory in the path of 
     files searched.
+- 2/23/2016
+    Add better type inference.
+
+
+Extended Documentation for in-code comments
+- 2/23/2016 FIXME in lib/primitives.fz (p_sample)
+    The sample operator is currently implemented as syntax because of the lack of type inference support.  Once type inference 
+    is added, this could be changed to a primitive.
+- 2/23/2016 FIXME in src/interpreter.ml (goDeepUnderLambda)
+    In partial evaluation, it is sometimes necessary to "peek" under lambda expressions to evaluate their bodies.  In fact, 
+    because of the way that primitive functions are implemented, we sometimes wish to peek under multiple lambdas at once.  
+    For instance, if an argument to a primitive function is itself a multi-argument function, then we need to peek under all 
+    of the lambdas representing all of the arguments of that function to get at its core body.  This function is designed to 
+    do that, but it's not clear whether it will do so in all cases.
+- 2/23/2016 FIXME in src/tycheck.ml (si_finite)
+    The sensitivity rule for type checking case expressions only makes sense when the sensitivity of the value extracted from 
+    the sum value is non-zero (this is r in the paper, and it is (si_lub si_x si_y) in the type_of function).  If this value 
+    \emph{is} zero, we have a problem.  Therefore, I put in a hack to max this value with a small, finite number -- the idea 
+    is that the result will be unchanged unless r is zero, and then it will be artificially converted to something non-zero.  
+    There are two ways to deal with this hack.  1) Redo sensitivities in a pretty big way so that zero times infinity is 
+    infinity (like in the paper) and fix all of the breaking repercussions this has; or 2) make a new case for the si type 
+    that is SiSmallFinite or something that properly adds, multiplies, and LUBs with other sensitivities.
+- 2/23/2016 TODO in src/math.ml
+    The system may be vulnerable to floating point related attacks, and the way to address this may be to do our own 
+    probability calculations (which are used for add_noise).
+- 2/23/2016 TODO in src/parser.mly (extend_var)
+    The Ctx module has been extended with extra support for adding variables to the context, but the parser is not yet making 
+    use of this support.  Updating this shouldn't change any visible outputs, but it may make debugging the parser (after 
+    future changes, say) easier.  Also, it's just a little cleaner and more elegant.
+- 2/23/2016 TODO in src/parser.mly (Term: LET)
+    The parser should probably throw an error if you try to write "let (x,x) = ...", but right now, it accepts it just fine.
+
+
 

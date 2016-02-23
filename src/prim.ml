@@ -267,6 +267,7 @@ let tyCheckFuzzFun
     message 3 "--- tyCheckFuzz: Before Partial evaluation: %a" pp_term f;
     inPartial (Interpreter.goUnderLambda f) >>= fun pf ->
     message 3 "--- tyCheckFuzz: Partial evaluation results in: %a" pp_term pf;
+    Tycheck.ty_seq := 0;
     match Tycheck.type_of pf (Ctx.empty_context, true) with 
         | Error e -> genFailResult @@ pp_to_string "" "%a" Tycheck.pp_tyerr e.v
         | Ok (tyf, _) -> begin
@@ -301,6 +302,7 @@ let runRedZone
     message 3 "--- RunRedZone: Before Partial evaluation: %a" pp_term f;
     inPartial (Interpreter.goUnderLambda f) >>= fun pf ->
     message 3 "--- RunRedZone: Partial evaluation results in: %a" pp_term pf;
+    Tycheck.ty_seq := 0;
     match Tycheck.type_of pf (Ctx.empty_context, true) with 
         | Error e -> genFailResult @@ pp_to_string "" "%a" Tycheck.pp_tyerr e.v
         | Ok (tyf, _) -> begin
@@ -345,7 +347,7 @@ let bagPairOperateFun
   (g : term)
   (bag : term list)
   : (term * term) interpreter = 
-    mapM (exPair exAny exAny "bagPairOperate") bag >>= fun bagp ->
+    mapM (fun t -> Interpreter.interp t >>= exPair exAny exAny "bagPairOperate") bag >>= fun bagp ->
     let (ba, bb) = List.split bagp in
     (match tyo with
       | TyTensor(ta,tb) -> return (ta,tb)
@@ -361,7 +363,7 @@ let bagmapFun
   (f : term)
   (b : term list)
   : (ty * term list) interpreter = 
-    mapM Interpreter.interp (List.map (fun tm -> TmApp(di, f, tm)) b) >>= fun lst ->
+    mapM (fun tm -> Interpreter.interp (TmApp(di, f, tm))) b >>= fun lst ->
     return (ty, lst)
 
 let bagsplitFun
@@ -385,32 +387,14 @@ let addNoiseFun
   : float = n +. Math.lap (1.0 /. eps)
 
 
-(* expMechFun : num[e] -> (R -> DB -o fuzzy num) -> R bag -> DB -o[e] fuzzy R *)
+(* expMechFun : num[e] -> (DB -o fuzzy ((R,num) bag)) -> DB -o[e] fuzzy R *)
 let expMechFun
-  (eps : float)
-  (quality : term)
-  (rbag : term list)
-  (db : term)
-  : term interpreter = 
-    mapM (fun r -> Interpreter.interp (TmApp(di, TmApp(di, quality, r), db)) 
-            >>= exNum "expMech"
-            >>= fun q -> return (r, q +. Math.lap (2.0 /. eps))) rbag >>= fun problist ->
-(*    Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
-      "--- expMech: Probabilities are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) problist));*)
-    let (res, _) = List.fold_left 
-            (fun best r -> if snd r > snd best then r else best)
-            (mkUnit di (), neg_infinity) problist in
-    return res
-
-
-(* expMechOnePassFun : num[e] -> (DB -o fuzzy ((R,num) bag)) -> DB -o[e] fuzzy R *)
-let expMechOnePassFun
   (eps : float)
   (quality : term)
   (db : term)
   : term interpreter = 
     Interpreter.interp (TmApp(di, quality, db)) >>= exBag "expMechOnePass" >>= fun resbag ->
-    mapM (exPair exAny exNum "expMechOnePass") resbag >>= fun rnumlist ->
+    mapM (fun t -> Interpreter.interp t >>= exPair exAny exNum "expMechOnePass") resbag >>= fun rnumlist ->
     let problist = List.map (fun (r,q) -> (r, q +. Math.lap (2.0 /. eps))) rnumlist in
 (*    Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
       "--- expMech: Scores are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) rnumlist));
@@ -506,9 +490,7 @@ let prim_list : (string * primfun) list = [
 ("_lor",  fun_of_2args "_lor"  exBool exBool mkBool ( || ));
 ("_land", fun_of_2args "_land" exBool exBool mkBool ( && ));
 
-(* These should be general equality, but right now, I'm not sure they are *)
 ("_eq",  fun_of_2args "_eq"  exAny exAny mkBool Syntax.tmEq);
-("_neq", fun_of_2args "_neq" exAny exAny mkBool ( <> ));
 
 (* Numerical Comparison Operators *)
 ("_lt",  fun_of_2args "_lt"  exNum exNum mkBool ( < ));
@@ -587,8 +569,7 @@ let prim_list : (string * primfun) list = [
 (* Differential Privacy mechanisms *)
 ("addNoise", fun_of_2args "addNoise" exNum exNum mkNum addNoiseFun);
 
-("expMech", fun_of_4args_i "expMech" exNum exFun exBag exAny mkAny expMechFun);
-("expMechOnePass", fun_of_3args_i "expMechOnePass" exNum exFun exAny mkAny expMechOnePassFun);
+("expMech", fun_of_3args_i "expMech" exNum exFun exAny mkAny expMechFun);
 
 (* Load data from external file *)
 ("bagFromFile",  fun_of_1arg_with_type_i "bagFromFile"  exString mkBag bagFromFileFun);

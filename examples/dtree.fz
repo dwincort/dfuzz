@@ -53,10 +53,9 @@ function chooseBestTree
   {
     test : = fun (t' : numtree) { fun (d :[] db) : num {
                   score = testTree t' d;
-                  intToFloat score } }; //FIXME I can't do the following if statement because it's infinitely sensitive.  How do I get the cutoffMod applied anyway?
-//                   if t == t' then { cutoffMod score }
-//                              else { intToFloat score } } };
-    expMech@[numtree]@[db] 1.0 test (addtobag@[numtree] t trees) db
+                  if t == t' then { cutoffMod score }
+                             else { intToFloat score } } };
+    expMechSimple@[numtree]@[db] 1.0 test (addtobag@[numtree] t trees) db
   }
 
 

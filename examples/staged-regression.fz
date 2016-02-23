@@ -101,7 +101,7 @@ function stagewiseRed
       // return it in the probability monad.
       res5 };
     // Run the exponential mechanism.
-    sample jcj = expMechOnePass@[(int,num)]@[db] eps' f db;
+    sample jcj = expMech@[(int,num)]@[db] eps' f db;
     // The result is both the index j and the value of c at j.
     let (j,cj) = jcj;
     if (j < 0) then {

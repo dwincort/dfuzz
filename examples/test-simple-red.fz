@@ -25,6 +25,24 @@ function test2 (x : num) : string {
   }
 }
 
+function test3 (x :[] num) : fuzzy num {
+  if x == 1 then {
+      return 100
+  } else {
+      return 200
+  }
+}
+// left is true and right is false
+function op_eqNB forall(A) (op1 : A) (op2 : A) : (() + ()) {
+    if op1 == op2 then { inl@[()]@[()]{()} } else { inr@[()]@[()]{()} }
+}
+function test4 (x :[] num) : fuzzy num {
+  case op_eqNB x 1 of {
+      inl(_) => return 100
+    | inr(_) => return 200
+  }
+}
+
 #include "library-lists.fz"
 testLst = cons@[num] 1 (cons@[num] 0.5 (cons@[num] 1 nil@[num]));
 sum = fun (l : list(num)) : num { list_lfoldl@[num]@[num] (fun (x :[] num) { fun (accum :[] num ) { x + accum } }) 0 l };
@@ -75,7 +93,7 @@ assertEq@[num]    "Simple SFuzz #6 " (getEpsilon ()) 0.0;
 loadDB@[num] 100.0 8.0;
 assertEq@[string] "Simple SFuzz #7 " (test1 3.1) "runRedZone expected a 3.-sensitive function but found a 3.1-sensitive function";
 assertEq@[num]    "Simple SFuzz #8 " (getEpsilon ()) 8.0;
-assertEq@[string] "Simple SFuzz #9 " (test2 2.0) "EEE [  0] Terms in sensitivity are not allowed in the red zone! Found: \"No asserts in red zone\"";
+assertEq@[string] "Simple SFuzz #9 " (test2 2.0) "EEE [  1] Terms in sensitivity are not allowed in the red zone! Found: \"No asserts in red zone\"";
 
 assertTyCheck@[list(num)]@[num] "Simple SFuzz #10" true 1.5 (innerProdFC testLst);
 assertTyCheck@[num]@[fuzzy num] "Simple SFuzz #11" true 2.0 (seq 1 1 (add_noise 1) (fun (x : num) { add_noise 1 }));
@@ -85,6 +103,14 @@ assertTyCheck@[(num, num)]@[fuzzy (num, num)] "Simple SFuzz #13" true 1.5 (par 1
 // sensitivity annotation updates is done in the green zone and so is ignored.  Thus, this really 
 // should pass just fine.  The only thing that we really care about is (max s t), and both operations 
 // are within this bound.
-assertTyCheck@[(num, num)]@[fuzzy (num, num)] "Simple SFuzz #13" false 1.5 (par 1.3 1.0 (add_noise 1.3) (add_noise 1.5));
+assertTyCheck@[(num, num)]@[fuzzy (num, num)] "Simple SFuzz #14" false 1.5 (par 1.3 1.0 (add_noise 1.3) (add_noise 1.5));
+
+
+
+loadDB@[num] 1 1;
+assertTyCheck@[num]@[fuzzy num] "Simple SFuzz #15" false 1 test3;
+assertEq@[(string + num)] "Simple SFuzz #16" (runFuzz@[num]@[num] test3) (inl@[string]@[num]{"EEE [  1] Cannot satisfy constraint ∞ <= 1.000"});
+assertTyCheck@[num]@[fuzzy num] "Simple SFuzz #17" false 1 test4;
+assertEq@[(string + num)] "Simple SFuzz #18" (runFuzz@[num]@[num] test4) (inl@[string]@[num]{"EEE [  1] Cannot satisfy constraint ∞ <= 1.000"});
 
 

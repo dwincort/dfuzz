@@ -150,6 +150,7 @@ module TypeSens = struct
   
   (* Constants *)
   let si_zero  = SiConst 0.0
+  let si_finite   = SiConst 0.001 (*FIXME: This is a hack to get type checking for union to work right*)
   let si_one   = SiConst 1.0
   let si_infty = SiInfty
   
@@ -186,7 +187,7 @@ module TypeSens = struct
         begin match si1, si2 with
           | SiInfty, _            -> return @@ SiInfty
           | _, SiInfty            -> return @@ SiInfty
-          | SiConst x, SiConst y  -> return @@ SiConst (if x > y then x else y)
+          | SiConst x, SiConst y  -> return @@ SiConst (max x y)
           | _   -> fail dummyinfo @@ Internal "Bad state when LUBing sensitivities"
         end
     
@@ -534,7 +535,7 @@ let rec type_of (t : term) : (ty * si list) checker  =
     check_type_sub i ty_x tya_x >>
 
 (*    ty_debug i "### Type of binder %a is %a" Print.pp_binfo x Print.pp_type ty_x;*)
-    return (ty_x, sis_x)  (* TODO: Not sure if this is right *)
+    return (ty_x, sis_x)
 
   (* sample b_x = tm_x; e *)
   | TmSample(i, b_x, tm_x, e)                              ->
@@ -628,11 +629,9 @@ let rec type_of (t : term) : (ty * si list) checker  =
     reportSensitivity 4 i b_x si_x          >>= fun si_x ->
     reportSensitivity 4 i b_y si_y          >>= fun si_y ->
     
-    (* TODO: Rather than check_type_sub in both directions, we want to find the 
-             most general type of tyl and tyr and return that. *)
     find_super_type i tyr tyl >>= fun tysup ->
 
-    return (tysup, add_sens (lub_sens sis_l sis_r) (scale_sens (si_lub si_x si_y) sis_e))
+    return (tysup, add_sens (lub_sens sis_l sis_r) (scale_sens (si_lub si_finite (si_lub si_x si_y)) sis_e))
 
   (* Type/Sensitivity Abstraction and Application *)
   | TmTyAbs(i, bi, tm) ->

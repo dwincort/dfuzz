@@ -289,7 +289,7 @@ let rec interp t =
                  fail @@ pp_to_string "**Interpreter** " "Union expected a sum value but found %a" pp_term tm
       end
 
-  (* Function Applicacion.  Interpret the argument and then the function 
+  (* Function Application.  Interpret the argument and then the function 
      in standard strict style.  Then, match the function.  If it is an 
      abstraction, perform the substitution.  However, take care when 
      performing because, if we are in partial evaluation mode, the argument 

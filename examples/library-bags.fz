@@ -169,18 +169,21 @@ function bagpartition forall (A, K) (klist: list(K)) (db :[] (K, A) bag) : list(
     }
 }
 
-
-// function expMech
-//   forall(A,DB)
-//   (eps : num)
-//   (foo : A -> DB -o[[eps]] num) 
-//   (rs : A bag) 
-//   (db :[] DB) 
-//   : fuzzy A {
-//     bar = fun (db :[[eps]] DB) : ((A,num) bag) {
-//       bagmap@[A]@[(A,num)] (fun (a : A) : (A,num) { (a, foo a db) }) rs
-//     };
-//     expMechOnePass@[A]@[DB] eps bar db
-// }
+/*
+ * A simplified version of the exponential mechanism that splits the quality function 
+ * up from the A bag of options.
+ */
+function expMechSimple
+  forall(A,DB)
+  (eps : num)
+  (quality : A -> DB -o[[eps]] num) 
+  (rs : A bag) 
+  (db :[] DB) 
+  : fuzzy A {
+    bar = fun (db :[[eps]] DB) : ((A,num) bag) {
+      bagmap@[A]@[(A,num)] (fun (a : A) : (A,num) { (a, quality a db) }) rs
+    };
+    expMech@[A]@[DB] eps bar db
+}
 
 

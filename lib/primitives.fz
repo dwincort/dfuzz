@@ -14,11 +14,11 @@ primitive snd forall (A,B) (p :[] (| A, B |) ) : B { "_snd" }
 // Infix logical operators
 primitive op_lor  (op1 : bool) (op2 : bool) : bool { "_lor" }
 primitive op_land (op1 : bool) (op2 : bool) : bool { "_land" }
+op_not = fun (b : bool) : bool { if b then { false } else { true } };
 
 // Polymorphic equality
-primitive op_eq   forall(A) (op1 :[] A) (op2 :[] A) : bool { "_eq" }
-// FIXME: Should this be a primitive?
-primitive op_neq  forall(A) (op1 :[] A) (op2 :[] A) : bool { "_neq" }
+primitive op_eq   forall(A) (op1 : A) (op2 : A) : bool { "_eq" }
+function  op_neq  forall(A) (op1 : A) (op2 : A) : bool { op_not (op_eq op1 op2) }
 
 // Num primitives
 // Numerical comparison
@@ -99,18 +99,18 @@ primitive loadDB forall(DB) (db : DB) (budget : epsilon) : () { "loadDB" }
 primitive tyCheckFuzz 
   forall(DB,A) 
   (sens : num)
-  (foo : DB -o[[sens]] A) 
+  (f : DB -o[[sens]] A) 
   : (string + ()) { "tyCheckFuzz" }
 
 primitive runFuzz
   forall(DB,A)
-  (foo : DB -o fuzzy A)
+  (f : DB -o fuzzy A)
   : (string + A) { "runRedZone" }
 
 primitive runFuzz'
   forall(DB,A)
   (sens : num)
-  (foo : DB -o[[sens]] fuzzy A)
+  (f : DB -o[[sens]] fuzzy A)
   : (string + A) { "runRedZoneS" }
 
 primitive getDelta   (_ : ()) : delta   { "getDelta"   }
@@ -120,9 +120,9 @@ function assertTyCheck forall(DB,A)
   (name : string)
   (shouldpass : bool)
   (sens : num)
-  (foo : DB -o[[sens]] A) 
+  (f : DB -o[[sens]] A) 
   : () {
-  res = tyCheckFuzz@[DB]@[A] sens foo;
+  res = tyCheckFuzz@[DB]@[A] sens f;
   case res of {
     inl(s) => if shouldpass then { assertEq@[string] name s "Success" } else { assert name true }
   | inr(_) => if shouldpass then { assert name true } else { assertEq@[string] name "Success" "Should Fail" }
@@ -136,21 +136,12 @@ primitive add_noise
   (n :[[eps]] num)
   : fuzzy num { "addNoise" }
 
-// Note that expMech can now be written in terms of expMechOnePass
 primitive expMech
   forall(A,DB)
   (eps : num)
-  (foo : A -> DB -o[[eps]] num) 
-  (rs : A bag) 
+  (quality : DB -o[[eps]] ((A,num) bag)) 
   (db :[] DB) 
   : fuzzy A { "expMech" }
-
-primitive expMechOnePass
-  forall(A,DB)
-  (eps : num)
-  (foo : DB -o[[eps]] ((A,num) bag)) 
-  (db :[] DB) 
-  : fuzzy A { "expMechOnePass" }
 
 ////////////////////////////////////////////////////////////////////////
 // Curry and uncurry
