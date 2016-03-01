@@ -45,6 +45,7 @@ type epsilon = float
 (* Sensitivities *)
 type si =
   | SiInfty
+  | SiNearZero
   | SiConst of float
   | SiTerm  of term
   | SiAdd   of si * si

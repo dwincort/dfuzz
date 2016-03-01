@@ -55,7 +55,7 @@ function chooseBestTree
                   score = testTree t' d;
                   if t == t' then { cutoffMod score }
                              else { intToFloat score } } };
-    expMechSimple@[numtree]@[db] 1.0 test (addtobag@[numtree] t trees) db
+    expMech@[numtree]@[db] 1.0 1.0 test (addtobag@[numtree] t trees) db
   }
 
 

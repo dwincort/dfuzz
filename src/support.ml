@@ -140,7 +140,8 @@ module Error = struct
       List.mem component !debug_options.components &&
       not (FileInfo.file_ignored fi) then
       begin
-	Format.eprintf "@[%s %s %a: @[" (level_to_string level) (comp_to_string component) FileInfo.pp_fileinfo fi;
+	let t = Sys.time() in
+	Format.eprintf "@[%s %s %.3f %a: @[" (level_to_string level) (comp_to_string component) t FileInfo.pp_fileinfo fi;
 	Format.kfprintf (fun ppf -> Format.fprintf ppf "@]@]@.") Format.err_formatter
       end
     else
@@ -151,11 +152,13 @@ module Error = struct
     let cont _ =
       Format.eprintf "@]@.";
       raise (Exit 1)                in
-    Format.eprintf "@[%s %s %a: " (level_to_string 0) (comp_to_string comp) FileInfo.pp_fileinfo fi;
+    let t = Sys.time() in
+    Format.eprintf "@[%s %s %.3f %a: " (level_to_string 0) (comp_to_string comp) t FileInfo.pp_fileinfo fi;
     Format.kfprintf cont Format.err_formatter
 
   let error_msg_pp comp fi pp v =
-    Format.eprintf "@[%s %s %a: %a@." (level_to_string 0) (comp_to_string comp)
+    let t = Sys.time() in
+    Format.eprintf "@[%s %s %.3f %a: %a@." (level_to_string 0) (comp_to_string comp) t
       FileInfo.pp_fileinfo fi pp v;
     raise (Exit 1)
 

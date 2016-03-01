@@ -121,6 +121,7 @@ let pp_binfo fmt b = pp_name fmt (b.b_type, b.b_name)
 let rec pp_si fmt s =
   match s with
   | SiInfty                -> fprintf fmt "%s" (u_sym Symbols.Inf)
+  | SiNearZero             -> fprintf fmt "%s" "0"
   | SiConst flt            -> fprintf fmt "%.3f" flt
   | SiTerm(t)              -> fprintf fmt "SiTerm(%a)" pp_term t
   | SiAdd (si1, si2)       -> fprintf fmt "(%a + %a)" pp_si si1 pp_si si2

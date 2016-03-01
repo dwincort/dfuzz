@@ -119,6 +119,20 @@ function zipWithS forall(A,B,C) (sens : num) (f : A -o[[sens]] B -o[[sens]] C) (
   inner l1 l2
 }
 
+function zipWithSS forall(A,B,C) (s1 : num) (s2 : num) (f : A -o[[s1]] B -o[[s2]] C) : list(A) -o[[s1]] list(B) -o[[s2]] list(C) {
+  function inner (l1 :[[s1]] list(A)) (l2 :[[s2]] list(B)) : list(C) {
+    case unfold l1 of {
+      inl(x) => nil@[C]
+    | inr(x) => case unfold l2 of {
+                  inl(y) => nil@[C]
+                | inr(y) => let (xh,xt) = x; let (yh,yt) = y;
+                            cons@[C] (f xh yh) (inner xt yt)
+                }
+      }
+  }
+  inner
+}
+
 function zipWith forall(A,B,C) (f : A -o B -o C) (l1 :[] list(A)) (l2 :[] list(B)) : list(C) {
   case unfold l1 of {
     inl(x) => nil@[C]
@@ -190,11 +204,10 @@ function index
   (ind : int)
   (lst :[] list(A))
   : A {
-    case (unfold lst) of {
-      inl(_)    => def
-    | inr(xxs)  => let (x,xs) = xxs;
-                   if (ind == 0) then { x }
-                                 else { index@[A] def (ind .- 1) xs }
+    if (ind <= 0) then {
+      head@[A] def lst
+    } else {
+      index@[A] def (ind .- 1) (tail@[A] lst)
     }
 }
 

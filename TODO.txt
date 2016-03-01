@@ -47,14 +47,9 @@ Extended Documentation for in-code comments
     For instance, if an argument to a primitive function is itself a multi-argument function, then we need to peek under all 
     of the lambdas representing all of the arguments of that function to get at its core body.  This function is designed to 
     do that, but it's not clear whether it will do so in all cases.
-- 2/23/2016 FIXME in src/tycheck.ml (si_finite)
-    The sensitivity rule for type checking case expressions only makes sense when the sensitivity of the value extracted from 
-    the sum value is non-zero (this is r in the paper, and it is (si_lub si_x si_y) in the type_of function).  If this value 
-    \emph{is} zero, we have a problem.  Therefore, I put in a hack to max this value with a small, finite number -- the idea 
-    is that the result will be unchanged unless r is zero, and then it will be artificially converted to something non-zero.  
-    There are two ways to deal with this hack.  1) Redo sensitivities in a pretty big way so that zero times infinity is 
-    infinity (like in the paper) and fix all of the breaking repercussions this has; or 2) make a new case for the si type 
-    that is SiSmallFinite or something that properly adds, multiplies, and LUBs with other sensitivities.
+- 2/24/2016 FIXME in src/tycheck.ml (check_sens_leq)
+    We add a small constant when we check whether one sensitivity is greater than or equal to another to avoid floating 
+    point issues, but this could be exploited.  It needs a better fix.
 - 2/23/2016 TODO in src/math.ml
     The system may be vulnerable to floating point related attacks, and the way to address this may be to do our own 
     probability calculations (which are used for add_noise).

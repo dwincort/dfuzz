@@ -54,6 +54,7 @@ module InterpMonad = struct
   let rec mapMSi (f : term -> term interpreter) (si : si) : si interpreter = 
     match si with
     | SiInfty         -> return @@ si
+    | SiNearZero      -> return @@ si
     | SiConst c       -> return @@ si
     | SiTerm  t       -> f t >>= fun x -> return @@ SiTerm x
     | SiAdd  (s1, s2) -> mapMSi f s1 >>= fun s1 -> mapMSi f s2 >>= fun s2 -> return @@ SiAdd  (s1, s2)

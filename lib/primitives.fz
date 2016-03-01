@@ -8,8 +8,12 @@
 // Core primitives resulting from parser desugaring
 
 // &-pair destruction
-primitive fst forall (A,B) (p :[] (| A, B |) ) : A { "_fst" }
-primitive snd forall (A,B) (p :[] (| A, B |) ) : B { "_snd" }
+primitive afst forall (A,B) (p :[] (| A, B |) ) : A { "_fst" }
+primitive asnd forall (A,B) (p :[] (| A, B |) ) : B { "_snd" }
+
+// pair destruction shortcuts
+function fst forall (A,B) (p :[] (A, B) ) : A { let (a,b) = p; a }
+function snd forall (A,B) (p :[] (A, B) ) : B { let (a,b) = p; b }
 
 // Infix logical operators
 primitive op_lor  (op1 : bool) (op2 : bool) : bool { "_lor" }
@@ -139,9 +143,29 @@ primitive add_noise
 primitive expMech
   forall(A,DB)
   (eps : num)
-  (quality : DB -o[[eps]] ((A,num) bag)) 
-  (db :[] DB) 
+  (k : num)
+  (quality : A -> DB -o[[k]] num) 
+  (rs : A bag) 
+  (db :[[eps]] DB) 
   : fuzzy A { "expMech" }
+
+primitive expMechWithScore
+  forall(A,DB)
+  (eps : num)
+  (k : num)
+  (quality : A -> DB -o[[k]] num) 
+  (rs : A bag) 
+  (db :[[2 * eps]] DB) 
+  : fuzzy (A, num) { "expMechWithScore" }
+
+primitive expMechUnsafe
+  forall(A,DB)
+  (eps : num)
+  (k   : num)
+  (r   : int)
+  (quality : DB -o[[k]] ((A,num) bag)) 
+  (db :[[eps]] DB) 
+  : fuzzy A { "expMechUnsafe" }
 
 ////////////////////////////////////////////////////////////////////////
 // Curry and uncurry

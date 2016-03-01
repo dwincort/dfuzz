@@ -14,9 +14,10 @@ typedef nlist = list(num);
 typedef clist = list(clipped);
 typedef db = (clipped, clist) bag;
 
+// Finds the sum of the absolute values of the given list.
 absum = fun (l : list(num)) : num { list_lfoldl@[num]@[num] (fun (accum :[] num) { fun (x :[] num ) { accum + (op_abs x) } }) 0 l };
 
-
+// Creates a list of length n with the value x for every entry.
 function replicate forall(A) (x : A) (n : int) : list(A) {
   if n <= 0 then { nil@[A] } else { cons@[A] x (replicate@[A] x (n .- 1)) }
 }
@@ -38,6 +39,7 @@ function innerProdFC
       
 function rowop
   (theta : nlist)
+  (d : num)
   (row : (clipped, clist))
   : clist {
     let (y,rlst) = row;
@@ -48,41 +50,99 @@ function rowop
     thetanorm = absum theta;
     list_map@[clipped]@[clipped] (fun (x : clipped) : clipped { 
         temp = (fromClip y - mew + thetanorm) * (fromClip x);
-        clip (temp / (2*thetanorm + 1))
+        clip (temp / d)
     }) rlst
 }
-  
-function gdRed
+
+function gdRedAllAtOnce
   (eps : num)
-  (dbSize : int)
+  (d   : num)
+  (eta : num)
   (theta : nlist)
   (db :[[eps]] db)
   : fuzzy nlist {
     len = length@[num] theta;
     thetanorm = absum theta;
-    eps' = eps / (4 * (thetanorm + 1));
     
-    // Get sum of each column.
-    sumVals = bagsumL len (bagmap@[(clipped, clist)]@[clist] (fun (ccs : (clipped, clist)) {let (_,cs) = ccs; cs}) db);
-    // The main operation is a map then sum over the database using the above "rowop" function
-    res1 = bagsumL len (bagmap@[(clipped, clist)]@[clist] (rowop theta) db);
-    // The above result was shifted to make sure all values would be between 0 and 1.
-    // We do a (|theta|+1)-sensitive operation to unshift and extract the results.
-    res2 = zipWithS@[num]@[num]@[num] (2*thetanorm + 1) 
-            (fun (v :[[2*thetanorm + 1]] num) { fun (c :[[2*thetanorm + 1]] num) {
-              (scale thetanorm c) - (scale (2*thetanorm + 1) v)}}) res1 sumVals;
-    // The result of this zip is the exact new correlation vector theta.
+    // Map over the database using the above "rowop" function then sum.  
+    // This function will get us the information we need, but it will shift 
+    // the calculated values in the bag to the range [0,1] so 
+    // that we can sum them.
+    res1 = bagsumL len (bagmap@[(clipped, clist)]@[clist] (rowop theta d) db);
+    
+    // Because the above result was shifted to make sure all values would be 
+    // between 0 and 1, we need to recover the results we want.  We must 
+    // multiply the result by d.
+    res2 = list_lmap@[num]@[num] d (scale d) res1;
+    
+    // The result of the above map (res2) is the exact new correlation vector theta.
     // We need to add noise to each element so that we can return it.
+    // In order to end up eps-sensitive, we must add (eps / d) noise.
+    eps' = eps / d / len;
     res3 = list_lmap@[num]@[fuzzy num] eps' (add_noise eps') res2;
+    
+    // Next, we convert from a list of fuzzy nums to a fuzzy list of nums, which 
+    // we can then sample to get a result.
     sample res4 = listfuzz@[num] res3;
-    res5 = list_map@[num]@[num] (clip_scale (clip 0.1)) res4;
-    return (zipWith@[num]@[num]@[num] op_sub theta res5)
+    
+    // After that, we multiply by 2*eta.  Because this is done after adding noise, we do not 
+    // need to worry about how big eta is for the purposes of sensitivity.
+    res5 = list_map@[num]@[num] (op_mul (2*eta)) res4;
+    
+    // Lastly, we add our result vector from our original guess theta to get 
+    // our new estimate for theta. (Note that this is an addition not a subtraction 
+    // because the result vector is actually the negation of the gradient descent 
+    // derivative.
+    return (zipWith@[num]@[num]@[num] op_add theta res5)
     
 }
 
-function gdGreen
+function gdRedSteps
+  (i   : int)
   (eps : num)
-  (dbSize : int)
+  (d   : num)
+  (eta : num)
+  (theta : nlist)
+  (db :[[eps]] db)
+  : fuzzy num {
+    len = length@[num] theta;
+    thetanorm = absum theta;
+    
+    // Map over the database using the above "rowop" function then sum.  
+    // This function will get us the information we need, but it will shift 
+    // the calculated values in the bag to the range [0,1] so 
+    // that we can sum them.
+    res1 = bagsum (bagmap@[(clipped, clist)]@[clipped] 
+              (fun (row : (clipped, clist)) {
+                  index@[clipped] (clip 0.0) i (rowop theta d row) })
+              db);
+    
+    // Because the above result was shifted to make sure all values would be 
+    // between 0 and 1, we need to recover the results we want.  We must 
+    // multiply the result by d.
+    res2 = scale d res1;
+    
+    // The result of the above map (res2) is the exact new correlation vector theta.
+    // We need to add noise to each element so that we can return it.
+    // In order to end up eps-sensitive, we must add (eps / d) noise.
+    eps' = eps / d;
+    sample res3 = add_noise eps' res2;
+    
+    // After that, we multiply by 2*eta.  Because this is done after adding noise, we do not 
+    // need to worry about how big eta is for the purposes of sensitivity.
+    res4 = 2*eta * res3;
+    
+    // Lastly, we add our result vector from our original guess theta to get 
+    // our new estimate for theta. (Note that this is an addition not a subtraction 
+    // because the result vector is actually the negation of the gradient descent 
+    // derivative.
+    return res4
+    
+}
+
+function gdGreenSteps
+  (eps : num)
+  (eta : num)
   (theta : nlist)
   (numIters : int)
   : string {
@@ -91,10 +151,50 @@ function gdGreen
     if (numIters <= 0) then {
       showList@[num] showNum theta
     } else {
-      rz = runFuzz'@[db]@[nlist] eps (gdRed eps dbSize theta);
+      thetanorm = absum theta;
+      print ("|theta|="^showNum thetanorm);
+      d = (2*thetanorm + 1);
+      // The maximum value for d should be (2*|theta| + 1), but if the rows in the database behave 
+      // nicely, it can be, perhaps, (|theta|/5 + 1).  Note that this means there might be actual 
+      // clipping happening.
+      len = length@[num] theta;
+      function stepEachParam (thetanew : nlist) (param : int) : string {
+          if param >= len then {
+              gdGreenSteps eps eta thetanew (numIters .- 1)
+          } else {
+              rz = runFuzz'@[db]@[num] eps (gdRedSteps param eps d eta theta);
+              case rz of {
+                inl(s) => s
+              | inr(iUpdate) => print ("Parameter "^showNum param^" calculated to change: "^showNum iUpdate);
+                                stepEachParam (performAt@[num] param (op_add iUpdate) thetanew) (param .+ 1)
+              }
+          }
+      }
+      stepEachParam theta 0
+    }
+}
+
+function gdGreen
+  (eps : num)
+  (eta : num)
+  (theta : nlist)
+  (numIters : int)
+  : string {
+    e = getEpsilon ();
+    print ("We have "^showNum e^"*ε budget remaining and have so far produced theta="^showList@[num] showNum theta);
+    if (numIters <= 0) then {
+      showList@[num] showNum theta
+    } else {
+      thetanorm = absum theta;
+      print ("|theta|="^showNum thetanorm);
+      d = (2*thetanorm + 1);
+      // The maximum value for d should be (2*|theta| + 1), but if the rows in the database behave 
+      // nicely, it can be, perhaps, (|theta|/5 + 1).  Note that this means there might be actual 
+      // clipping happening.
+      rz = runFuzz'@[db]@[nlist] eps (gdRedAllAtOnce eps d eta theta);
       case rz of {
         inl(s) => s
-      | inr(theta') => gdGreen eps dbSize theta' (numIters .- 1)
+      | inr(theta') => gdGreen eps eta theta' (numIters .- 1)
       }
     }
 }
@@ -102,17 +202,20 @@ function gdGreen
 
 
 
-db = (db = listbagFromFile@[num] "examples/data/baglist2.dat" "[ \\t]+";
-      db = bagmap@[nlist]@[clist]
-            (fun (l : nlist) : clist {
-              list_map@[num]@[clipped] (fun (x : num) : clipped { clip (x / 10.0) }) l}) db;
-      bagmap@[clist]@[(clipped,clist)] (uncons (clip 0.0)) db);
+db = (db = listbagFromFile@[clipped] "examples/data/census-income-cont-clip-data-short.data" ",";
+      db = bagmap@[clist]@[(clipped,clist)] (uncons@[clipped] (clip 0)) db;
+      db);
+// db = (db = listbagFromFile@[num] "examples/data/baglist2.dat" "[ \\t]+";
+//       db = bagmap@[nlist]@[clist]
+//             (fun (l : nlist) : clist {
+//               list_map@[num]@[clipped] (fun (x : num) : clipped { clip (x / 10.0) }) l}) db;
+//       bagmap@[clist]@[(clipped,clist)] (uncons (clip 0.0)) db);
 
 
 // WHITE ZONE
 loadDB@[db] db 500;
-dbSize = bagsize@[(clipped,clist)] db;
-gdGreen 10 dbSize (replicate@[num] 0.0 3) 30
+dbsize = bagsize@[(clipped, clist)] db;
+gdGreenSteps 10 (3/dbsize) (replicate@[num] 0.0 8) 30
 
 
 

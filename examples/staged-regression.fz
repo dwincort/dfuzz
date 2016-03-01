@@ -21,6 +21,13 @@ function replicate forall(A) (x : A) (n : int) : list(A) {
   if n <= 0 then { nil@[A] } else { cons@[A] x (replicate@[A] x (n .- 1)) }
 }
 
+function count (start : int) (end : int) : list(int) {
+  if start > end then {
+    nil@[int]
+  } else {
+    cons@[int] start (count (start .+ 1) end)
+  }
+}
 
 // Inner Product with a Fixed length and a Constant first list
 function innerProdFC
@@ -52,6 +59,7 @@ function pairWithCount
 
 function rowop
   (beta : nlist)
+  (d   : num)
   (row : (clipped, clist))
   : clist {
     let (y,rlst) = row;
@@ -62,46 +70,89 @@ function rowop
     betanorm = absum beta;
     list_map@[clipped]@[clipped] (fun (x : clipped) : clipped { 
         temp = (fromClip y - mew + betanorm) * (fromClip x);
-        clip (temp / (2*betanorm + 1))
+        clip (temp / d)
     }) rlst
 }
   
-function stagewiseRed
+function stagewiseRedUnsafe
   (eps : num)
+  (d   : num)
   (smallconstant : num)
-  (dbSize : int)
   (threshold : num)
   (beta : nlist)
   (db :[[eps]] db)
   : fuzzy nlist {
     len = length@[num] beta;
-    betanorm = absum beta;
-    eps' = eps * 4 * (betanorm + 1);
+    k = (2 * d * len);
     // This function f will be what we pass to the exponential mechanism
-    f = fun (db :[[eps']] db) : (((int,num),num) bag) {
-      // Get the average value of each column.  Start by summing them.
-      sumVals = bagsumL len (bagmap@[(clipped, clist)]@[clist] (fun (ccs : (clipped, clist)) {let (_,cs) = ccs; cs}) db);
+    f = fun (db :[[k]] db) : (((int,num),num) bag) {
+      
       // The main operation is a map then sum over the database using the above "rowop" function
-      res1 = bagsumL len (bagmap@[(clipped, clist)]@[clist] (rowop beta) db);
-      // The above result was shifted to make sure all values would be between 0 and 1.
-      // We do a (|beta|+1)-sensitive operation to unshift and extract the results.
-      res2 = zipWithS@[num]@[num]@[num] (betanorm + 1) 
-              (fun (v :[[betanorm + 1]] num) { fun (c :[[betanorm + 1]] num) {
-                (scale (betanorm + 1) v) - (scale betanorm c)}}) res1 sumVals;
-      // The result of the fold is the current correlation vector c.  We pair each value with its index.
+      res1 = bagsumL len (bagmap@[(clipped, clist)]@[clist] (rowop beta d) db);
+      
+      // Because the above result was shifted to make sure all values would be 
+      // between 0 and 1, we need to recover the results we want.  We must 
+      // multiply the result by d.
+      res2 = list_lmap@[num]@[num] d (scale d) res1;
+      
+      // The result of the map is the current correlation vector c.  We pair each value with its index.
       res3 = pairWithCount@[num] 0 res2;
+      
       // We massage the data into a proper form for the expMechOnePass function.
       // Unfortunately, this is 2-sensitive because we need to use the value both 
       // as a score for the exponential mechanism as well as a result to check its sign.
       // TODO: Is there a way to reduce the sensitivity because we know that we'll only be using 
       // the sign of the value?
-      res4 = list_lmap@[(int,num)]@[((int,num),num)] 2 (fun (xy :[2] (int,num)) : ((int,num),num) { let (i,n) = xy; ((i,n),op_abs n) }) res3;
+      res4 = list_lmap@[(int,num)]@[((int,num),num)] 2 
+        (fun (xy :[2] (int,num)) : ((int,num),num) { 
+            let (i,n) = xy; ((i,n),op_abs n) })
+        res3;
+      
       // Convert the result to a bag and add the threshold value
-      res5 = addtobag@[((int,num),num)] ((0 .- 1,threshold), threshold) (listtobag@[((int,num),num)] res4);
-      // return it in the probability monad.
-      res5 };
+      addtobag@[((int,num),num)] ((0 .- 1,threshold), threshold) (listtobag@[((int,num),num)] res4)
+    };
     // Run the exponential mechanism.
-    sample jcj = expMech@[(int,num)]@[db] eps' f db;
+    sample jcj = expMechUnsafe@[(int,num)]@[db] eps k len f db;
+    // The result is both the index j and the value of c at j.
+    let (j,cj) = jcj;
+    if (j < 0) then {
+      return beta
+    } else {
+      signedconstant = if cj > 0 then { smallconstant } else { 0 - smallconstant };
+      return@[nlist] (performAt@[num] j (op_add signedconstant) beta)
+    }
+}
+
+function stagewiseRed
+  (eps : num)
+  (d   : num)
+  (smallconstant : num)
+  (threshold : num)
+  (beta : nlist)
+  (db :[[eps]] db)
+  : fuzzy nlist {
+    len = length@[num] beta;
+    k = (2 * d);
+    // This function f will be what we pass to the exponential mechanism
+    f = fun (r : int) { fun (db :[[k]] db) : num { //0 }};
+      // The main operation is a map then sum over the database using the above "rowop" function
+      // We have to put this operation outside of (before) the if statement because partial 
+      // evaluation will not function properly within the if statement.
+      // This is a quirk of expMech.
+      res1 = bagsum (bagmap@[(clipped, clist)]@[clipped] 
+                (fun (row : (clipped, clist)) {
+                    index@[clipped] (clip 0.0) r (rowop beta d row) })
+                db);
+      if r < 0 then {
+        threshold
+      } else {
+        scale d res1
+      }
+    }};
+    // The indexes plus a -1 value for the threshold
+    rbag = listtobag@[int] (count (0 .- 1) len);
+    // Run the exponential mechanism.
+    sample jcj = expMechWithScore@[int]@[db] (eps/2) k f rbag db;
     // The result is both the index j and the value of c at j.
     let (j,cj) = jcj;
     if (j < 0) then {
@@ -115,35 +166,42 @@ function stagewiseRed
 function stagewiseGreen
   (eps : num)
   (smallconstant : num)
-  (dbSize : int)
   (threshold : num)
   (beta : nlist)
   : string {
     e = getEpsilon ();
     print ("We have "^showNum e^"*ε budget remaining and have so far produced beta="^showList@[num] showNum beta);
-    rz = runFuzz'@[db]@[nlist] eps (stagewiseRed eps smallconstant dbSize threshold beta);
+    betanorm = absum beta;
+    d = (2*betanorm + 1);
+    // The maximum value for d should be (2*|beta| + 1), but if the rows in the database behave 
+    // nicely, it can be, perhaps, (|beta|/5 + 1).  Note that this means there might be actual 
+    // clipping happening.
+    rz = runFuzz'@[db]@[nlist] eps (stagewiseRedUnsafe eps d smallconstant threshold beta);
     case rz of {
       inl(s) => s
     | inr(beta') =>
         if (beta == beta') then { showList@[num] showNum beta }
-                           else { stagewiseGreen eps smallconstant dbSize threshold beta' }
+                           else { stagewiseGreen eps smallconstant threshold beta' }
     }
 }
 
 
 
 
-db = (db = listbagFromFile@[num] "examples/data/baglist2.dat" "[ \\t]+";
-      db = bagmap@[nlist]@[clist]
-            (fun (l : nlist) : clist {
-              list_map@[num]@[clipped] (fun (x : num) : clipped { clip (x / 10.0) }) l}) db;
-      bagmap@[clist]@[(clipped,clist)] (uncons (clip 0.0)) db);
+db = (db = listbagFromFile@[clipped] "examples/data/census-income-cont-clip-data-short.data" ",";
+      db = bagmap@[clist]@[(clipped,clist)] (uncons@[clipped] (clip 0)) db;
+      db);
+// db = (db = listbagFromFile@[num] "examples/data/baglist2.dat" "[ \\t]+";
+//       db = bagmap@[nlist]@[clist]
+//             (fun (l : nlist) : clist {
+//               list_map@[num]@[clipped] (fun (x : num) : clipped { clip (x / 10.0) }) l}) db;
+//       db = bagmap@[clist]@[(clipped,clist)] (uncons (clip 0.0)) db;
+//       db);
 
 
 // WHITE ZONE
-loadDB@[db] db 300;
-dbSize = bagsize@[(clipped,clist)] db;
-stagewiseGreen 10 0.05 dbSize 0.05 (replicate@[num] 0.0 3)
+loadDB@[db] db 1000;
+stagewiseGreen 1 0.05 0.05 (replicate@[num] 0.0 8)
 
 
 

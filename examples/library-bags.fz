@@ -112,18 +112,20 @@ primitive bagsum (b :[] clipped bag) : num { "bagsum" }
 primitive bagPairOperate forall(A,B,C,D)
   (f : (A bag) -o C)
   (g : (B bag) -o D)
-  (b :[] (A,B) bag) : (C,D) { "bagPairOperate" }
+  (b :[2] (A,B) bag) : (C,D) { "bagPairOperate" }
 
-function bagsumL (n : int) (b :[] (list(clipped)) bag) : list(num) {
-  if n <= 0 then {
-    nil@[num]
-  } else {
-    let (c,d) = bagPairOperate@[clipped]@[list(clipped)]@[num]@[list(num)] 
-                    bagsum (bagsumL (n .- 1)) 
-                    (bagmap@[list(clipped)]@[(clipped, list(clipped))] (uncons@[clipped] (clip 0.0)) b);
-    cons@[num] c d
-  }
-}
+// function bagsumL (n : int) (b :[[n]] (list(clipped)) bag) : list(num) {
+//   if n <= 0 then {
+//     nil@[num]
+//   } else {
+//     let (c,d) = bagPairOperate@[clipped]@[list(clipped)]@[num]@[list(num)] 
+//                     bagsum (bagsumL (n .- 1)) 
+//                     (bagmap@[list(clipped)]@[(clipped, list(clipped))] (uncons@[clipped] (clip 0.0)) b);
+//     cons@[num] c d
+//   }
+// }
+
+primitive bagsumL (n : int) (b :[[n]] (list(clipped)) bag) : list(num) { "bagsumL" }
 
 //////////////////////////////////////////////////////////////////////
 // Utilities
@@ -168,22 +170,4 @@ function bagpartition forall (A, K) (klist: list(K)) (db :[] (K, A) bag) : list(
                 cons@[(K,A) bag] db1 (bagpartition@[A]@[K] ks db2)
     }
 }
-
-/*
- * A simplified version of the exponential mechanism that splits the quality function 
- * up from the A bag of options.
- */
-function expMechSimple
-  forall(A,DB)
-  (eps : num)
-  (quality : A -> DB -o[[eps]] num) 
-  (rs : A bag) 
-  (db :[] DB) 
-  : fuzzy A {
-    bar = fun (db :[[eps]] DB) : ((A,num) bag) {
-      bagmap@[A]@[(A,num)] (fun (a : A) : (A,num) { (a, quality a db) }) rs
-    };
-    expMech@[A]@[DB] eps bar db
-}
-
 

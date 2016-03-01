@@ -150,12 +150,13 @@ module TypeSens = struct
   
   (* Constants *)
   let si_zero  = SiConst 0.0
-  let si_finite   = SiConst 0.001 (*FIXME: This is a hack to get type checking for union to work right*)
+  let si_nearzero = SiNearZero
   let si_one   = SiConst 1.0
   let si_infty = SiInfty
   
   let rec si_simpl' (si : si) : si checker = match si with
     | SiInfty   -> return @@ si
+    | SiNearZero -> return @@ si
     | SiConst _ -> return @@ si
     | SiTerm(TmPrim(_, PrimTNum(f)))  -> return @@ SiConst f
     | SiTerm(TmPrim(_, PrimTInt(i)))  -> return @@ SiConst (float_of_int i)
@@ -167,6 +168,8 @@ module TypeSens = struct
         begin match si1, si2 with
           | SiInfty, _  -> return @@ SiInfty
           | _, SiInfty  -> return @@ SiInfty
+          | SiNearZero, s  -> return @@ s
+          | s, SiNearZero  -> return @@ s
           | SiConst x1, SiConst x2 -> return @@ SiConst (x1 +. x2)
           | _   -> fail dummyinfo @@ Internal "Bad state when adding sensitivities"
         end
@@ -178,6 +181,8 @@ module TypeSens = struct
           | _, SiConst 0.0 -> return @@ si_zero
           | SiInfty, _  -> return @@ SiInfty
           | _, SiInfty  -> return @@ SiInfty
+          | SiNearZero, _  -> return @@ SiNearZero
+          | _, SiNearZero  -> return @@ SiNearZero
           | SiConst x1, SiConst x2 -> return @@ SiConst (x1 *. x2)
           | _   -> fail dummyinfo @@ Internal "Bad state when multiplying sensitivities"
         end
@@ -187,7 +192,10 @@ module TypeSens = struct
         begin match si1, si2 with
           | SiInfty, _            -> return @@ SiInfty
           | _, SiInfty            -> return @@ SiInfty
+          | SiConst 0.0, SiConst 0.0 -> return @@ si_zero
           | SiConst x, SiConst y  -> return @@ SiConst (max x y)
+          | SiNearZero, s  -> return @@ s
+          | s, SiNearZero  -> return @@ s
           | _   -> fail dummyinfo @@ Internal "Bad state when LUBing sensitivities"
         end
     
@@ -224,7 +232,8 @@ module TypeSens = struct
     si_simpl' sir >>= fun sir ->
     let res = match sil, sir with
       | _, SiInfty -> true
-      | SiConst l, SiConst r -> (l <= r +. 0.0001)
+      | SiNearZero, _ -> true
+      | SiConst l, SiConst r -> (l <= r +. 0.0001) (*FIXME: This is here because of a floating point issue, but it's a vulnerability*)
       | _, _ -> false
     in if res then return () else fail i @@ SensError(sil, sir)
   
@@ -631,7 +640,7 @@ let rec type_of (t : term) : (ty * si list) checker  =
     
     find_super_type i tyr tyl >>= fun tysup ->
 
-    return (tysup, add_sens (lub_sens sis_l sis_r) (scale_sens (si_lub si_finite (si_lub si_x si_y)) sis_e))
+    return (tysup, add_sens (lub_sens sis_l sis_r) (scale_sens (si_lub si_nearzero (si_lub si_x si_y)) sis_e))
 
   (* Type/Sensitivity Abstraction and Application *)
   | TmTyAbs(i, bi, tm) ->

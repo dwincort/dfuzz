@@ -76,6 +76,15 @@ module Creation = struct
   let mkPair mk1 mk2 i (t1, t2) = TmPair (i, mk1 i t1, mk2 i t2)
   let mkAny _i t   = t
   let mkUnit i _   = TmPrim (i, PrimTUnit)
+  let nb_tyvar n = {b_name = n; b_type = BiTyVar; b_size = -1; b_prim = false;}
+
+  let rec mkList mkA ty i lst = 
+    let lsttype = TyMu({b_name = "XX"; b_type = BiTyVar; b_size = -1; b_prim = false;}, TyUnion
+            (TyPrim PrimUnit, TyTensor(ty, TyVar
+                ({v_index = 0; v_name = "XX"; v_size = -1; v_type = BiTyVar;})))) in
+    match lst with
+    | [] -> TmFold(i, lsttype, TmLeft(i, TmPrim(i, PrimTUnit), TyTensor(ty, lsttype)))
+    | x::xs -> TmFold(i, lsttype, TmRight(i, TmPair(i, mkA i x, mkList mkA ty i xs), TyPrim PrimUnit))
   
   (* The fun_of_*_arg* functions are short hands for making the primitives easily *)
   let fun_of_no_args_with_type_i
@@ -147,7 +156,7 @@ module Creation = struct
     (name : string)                           (* The name of the function - for debug purposes *)
     (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
     (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
-    (ethd : string -> term -> 'c interpreter) (* An extractor for the second argument *)
+    (ethd : string -> term -> 'c interpreter) (* An extractor for the third argument *)
     (mk : info -> 'd -> term)                 (* A maker for the result *)
     (op : ty -> 'a -> 'b -> 'c -> 'd interpreter) (* The operation to perform *)
     : primfun = 
@@ -163,7 +172,7 @@ module Creation = struct
     (name : string)                           (* The name of the function - for debug purposes *)
     (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
     (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
-    (ethd : string -> term -> 'c interpreter) (* An extractor for the second argument *)
+    (ethd : string -> term -> 'c interpreter) (* An extractor for the third argument *)
     (mk : info -> 'd -> term)                 (* A maker for the result *)
     (op : 'a -> 'b -> 'c -> 'd interpreter)   (* The operation to perform *)
     : primfun = fun_of_3args_with_type_i name efst esnd ethd mk (fun _ty x y z -> op x y z)
@@ -172,7 +181,7 @@ module Creation = struct
     (name : string)                           (* The name of the function - for debug purposes *)
     (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
     (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
-    (ethd : string -> term -> 'c interpreter) (* An extractor for the second argument *)
+    (ethd : string -> term -> 'c interpreter) (* An extractor for the third argument *)
     (mk : info -> 'd -> term)                 (* A maker for the result *)
     (op : 'a -> 'b -> 'c -> 'd)               (* The operation to perform *)
     : primfun = fun_of_3args_with_type_i name efst esnd ethd mk (fun _ty x y z -> return (op x y z))
@@ -182,8 +191,8 @@ module Creation = struct
     (name : string)                           (* The name of the function - for debug purposes *)
     (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
     (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
-    (ethd : string -> term -> 'c interpreter) (* An extractor for the second argument *)
-    (efth : string -> term -> 'd interpreter) (* An extractor for the second argument *)
+    (ethd : string -> term -> 'c interpreter) (* An extractor for the third argument *)
+    (efth : string -> term -> 'd interpreter) (* An extractor for the fourth argument *)
     (mk : info -> 'e -> term)                 (* A maker for the result *)
     (op : ty -> 'a -> 'b -> 'c -> 'd -> 'e interpreter)   (* The operation to perform *)
     : primfun = 
@@ -200,11 +209,42 @@ module Creation = struct
     (name : string)                           (* The name of the function - for debug purposes *)
     (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
     (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
-    (ethd : string -> term -> 'c interpreter) (* An extractor for the second argument *)
-    (efth : string -> term -> 'd interpreter) (* An extractor for the second argument *)
+    (ethd : string -> term -> 'c interpreter) (* An extractor for the third argument *)
+    (efth : string -> term -> 'd interpreter) (* An extractor for the fourth argument *)
     (mk : info -> 'e -> term)                 (* A maker for the result *)
     (op : 'a -> 'b -> 'c -> 'd -> 'e interpreter) (* The operation to perform *)
     : primfun = fun_of_4args_with_type_i name efst esnd ethd efth mk (fun _ty a b c d -> op a b c d)
+
+  let fun_of_5args_with_type_i
+    (name : string)                           (* The name of the function - for debug purposes *)
+    (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
+    (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
+    (ethd : string -> term -> 'c interpreter) (* An extractor for the third argument *)
+    (efth : string -> term -> 'd interpreter) (* An extractor for the fourth argument *)
+    (efft : string -> term -> 'e interpreter) (* An extractor for the fifth argument *)
+    (mk : info -> 'f -> term)                 (* A maker for the result *)
+    (op : ty -> 'a -> 'b -> 'c -> 'd -> 'e -> 'f interpreter)   (* The operation to perform *)
+    : primfun = 
+    PrimFun (fun (ty, tlst) -> match tlst with
+      | ta :: tb :: tc :: td :: te :: []
+          -> efst name ta >>= fun a ->
+             esnd name tb >>= fun b ->
+             ethd name tc >>= fun c ->
+             efth name td >>= fun d ->
+             efft name te >>= fun e ->
+             op ty a b c d e >>= fun res -> return (mk di res)
+      | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected 5 arguments but found %a" name (pp_list pp_term) tlst)
+  
+  let fun_of_5args_i
+    (name : string)                           (* The name of the function - for debug purposes *)
+    (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
+    (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
+    (ethd : string -> term -> 'c interpreter) (* An extractor for the third argument *)
+    (efth : string -> term -> 'd interpreter) (* An extractor for the second argument *)
+    (efft : string -> term -> 'e interpreter) (* An extractor for the fifth argument *)
+    (mk : info -> 'f -> term)                 (* A maker for the result *)
+    (op : 'a -> 'b -> 'c -> 'd -> 'e -> 'f interpreter) (* The operation to perform *)
+    : primfun = fun_of_5args_with_type_i name efst esnd ethd efth efft mk (fun _ty -> op)
 
 end
 
@@ -269,7 +309,7 @@ let tyCheckFuzzFun
     message 3 "--- tyCheckFuzz: Partial evaluation results in: %a" pp_term pf;
     Tycheck.ty_seq := 0;
     match Tycheck.type_of pf (Ctx.empty_context, true) with 
-        | Error e -> genFailResult @@ pp_to_string "" "%a" Tycheck.pp_tyerr e.v
+        | Error e -> genFailResult @@ pp_to_string "TYPE FAIL: " "%a %a" pp_fileinfo e.i Tycheck.pp_tyerr e.v
         | Ok (tyf, _) -> begin
       message 3 "--- tyCheckFuzz: Type checking completed and found type: %a" pp_type tyf;
       (match tyf with
@@ -304,7 +344,7 @@ let runRedZone
     message 3 "--- RunRedZone: Partial evaluation results in: %a" pp_term pf;
     Tycheck.ty_seq := 0;
     match Tycheck.type_of pf (Ctx.empty_context, true) with 
-        | Error e -> genFailResult @@ pp_to_string "" "%a" Tycheck.pp_tyerr e.v
+        | Error e -> genFailResult @@ pp_to_string "TYPE FAIL: " "%a %a" pp_fileinfo e.i Tycheck.pp_tyerr e.v
         | Ok (tyf, _) -> begin
       message 3 "--- RunRedZone: Type checking completed and found type: %a" pp_type tyf;
       (match tyf with
@@ -328,8 +368,20 @@ let runRedZone
 let showBagFun
   (b : term list)
   : string interpreter =
-    mapM (exString "showBag") b >>= fun strList ->
+    mapM (fun t -> Interpreter.interp t >>= exString "showBag") b >>= fun strList ->
     return @@ String.concat "," strList
+
+let bagsumLFun
+  (n : int)
+  (b : term list)
+  : (float list) interpreter =
+    let rec sumUp xs ys = match xs,ys with
+            | x::xs,y::ys -> (x +. y)::sumUp xs ys
+            | xs,[] -> xs
+            | [],ys -> ys
+    in 
+    mapM (fun t -> Interpreter.interp t >>= exList exNum "bagsumL") b >>= fun numlstlst ->
+    return @@ (List.fold_left sumUp [] numlstlst)
 
 let rec bagfoldlFun
   (f : term)
@@ -363,8 +415,7 @@ let bagmapFun
   (f : term)
   (b : term list)
   : (ty * term list) interpreter = 
-    mapM (fun tm -> Interpreter.interp (TmApp(di, f, tm))) b >>= fun lst ->
-    return (ty, lst)
+    return (ty, List.map (fun tm -> TmApp(di, f, tm)) b)
 
 let bagsplitFun
   (oty : ty)
@@ -387,20 +438,64 @@ let addNoiseFun
   : float = n +. Math.lap (1.0 /. eps)
 
 
-(* expMechFun : num[e] -> (DB -o fuzzy ((R,num) bag)) -> DB -o[e] fuzzy R *)
+(* expMechFun : num[s] -> num[k] -> (R -> DB -o[k] num) -> R bag -> DB -o[s] fuzzy R *)
 let expMechFun
   (eps : float)
+  (k : float)
+  (quality : term)
+  (rbag : term list)
+  (db : term)
+  : term interpreter = 
+    mapM (fun r -> Interpreter.interp (TmApp(di, TmApp(di, quality, r), db)) 
+            >>= exNum "expMech"
+            >>= fun q -> return (r, q +. Math.lap (k /. eps))) rbag >>= fun problist ->
+(*    Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
+      "--- expMech: Probabilities are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) problist));*)
+    let (res, _i) = List.fold_left 
+            (fun best r -> if snd r > snd best then r else best)
+            (mkUnit di (), neg_infinity) problist in
+    return res
+
+(* expMechWithScoreFun : num[s] -> num[k] -> (R -> DB -o[k] num) -> R bag -> DB -o[s] fuzzy (R, num) *)
+let expMechWithScoreFun
+  (eps : float)
+  (k : float)
+  (quality : term)
+  (rbag : term list)
+  (db : term)
+  : (term * float) interpreter = 
+    mapM (fun r -> Interpreter.interp (TmApp(di, TmApp(di, quality, r), db)) 
+            >>= exNum "expMechWithScore"
+            >>= fun q -> return (r, q +. Math.lap (k /. eps))) rbag >>= fun problist ->
+(*    Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
+      "--- expMechWithScore: Probabilities are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) problist));*)
+    let (res, i) = List.fold_left 
+            (fun best r -> if snd r > snd best then r else best)
+            (mkUnit di (), neg_infinity) problist in
+    return (res, i)
+
+(* expMechUnsafeFun : num[s] -> num[k] -> int -> (DB -o[k] ((R,num) bag)) -> DB -o[s] fuzzy R *)
+(* This function cannot is trying to be a shortcut/simplification of expMech, but it cannot work.  
+   We would like to say something like: if we use the DB k times to make a k-length bag, then that 
+   means we've used it once for each element of the bag.  However, this does not follow.  Thus, 
+   we really should use the regular expMech.  But, expMech can be quite slow, and this version 
+   speeds things up.  Thus, it's left around for uses in performing examples, but it is not allowed 
+   to be actually released. *)
+let expMechUnsafeFun
+  (eps : float)
+  (k : float)
+  (rmod : int)
   (quality : term)
   (db : term)
   : term interpreter = 
-    Interpreter.interp (TmApp(di, quality, db)) >>= exBag "expMechOnePass" >>= fun resbag ->
-    mapM (fun t -> Interpreter.interp t >>= exPair exAny exNum "expMechOnePass") resbag >>= fun rnumlist ->
-    let problist = List.map (fun (r,q) -> (r, q +. Math.lap (2.0 /. eps))) rnumlist in
+    Interpreter.interp (TmApp(di, quality, db)) >>= exBag "expMechUnsafe" >>= fun resbag ->
+    mapM (fun t -> Interpreter.interp t >>= exPair exAny exNum "expMechUnsafe") resbag >>= fun rnumlist ->
+    let problist = List.map (fun (r,q) -> (r, q +. Math.lap (k /. eps /. (float_of_int rmod)))) rnumlist in
 (*    Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
-      "--- expMech: Scores are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) rnumlist));
+      "--- expMechUnsafe: Scores are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) rnumlist));
     Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
-      "--- expMech: Probabilities are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) problist));*)
-    let (res, i) = List.fold_left 
+      "--- expMechUnsafe: Probabilities are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) problist));*)
+    let (res, _i) = List.fold_left 
             (fun best r -> if snd r > snd best then r else best)
             (mkUnit di (), neg_infinity) problist in
     return res
@@ -560,7 +655,8 @@ let prim_list : (string * primfun) list = [
 ("bagmap", fun_of_2args_with_type_i "bagmap" exFun exBag mkBag bagmapFun);
 
 ("bagsum", fun_of_1arg_i "bagsum" exBag mkNum 
-  (fun l -> mapM (exNum "bagsum") l >>= fun l' -> return (List.fold_left (+.) 0.0 l')));
+  (fun l -> mapM (fun t -> Interpreter.interp t >>= exNum "bagsum") l >>= fun l' -> return (List.fold_left (+.) 0.0 l')));
+("bagsumL", fun_of_2args_i "bagsumL" exInt exBag (mkList mkNum (TyPrim PrimNum)) bagsumLFun);
 ("bagPairOperate", fun_of_3args_with_type_i "bagPairOperate" exFun exFun exBag (mkPair mkAny mkAny) bagPairOperateFun);
 
 ("bagsplit", fun_of_2args_with_type_i "bagsplit" exFun exBag (mkPair mkBag mkBag) bagsplitFun);
@@ -569,7 +665,9 @@ let prim_list : (string * primfun) list = [
 (* Differential Privacy mechanisms *)
 ("addNoise", fun_of_2args "addNoise" exNum exNum mkNum addNoiseFun);
 
-("expMech", fun_of_3args_i "expMech" exNum exFun exAny mkAny expMechFun);
+("expMech", fun_of_5args_i "expMech" exNum exNum exFun exBag exAny mkAny expMechFun);
+("expMechWithScore", fun_of_5args_i "expMechWithScore" exNum exNum exFun exBag exAny (mkPair mkAny mkNum) expMechWithScoreFun);
+("expMechUnsafe", fun_of_5args_i "expMechUnsafe" exNum exNum exInt exFun exAny mkAny expMechUnsafeFun);
 
 (* Load data from external file *)
 ("bagFromFile",  fun_of_1arg_with_type_i "bagFromFile"  exString mkBag bagFromFileFun);
