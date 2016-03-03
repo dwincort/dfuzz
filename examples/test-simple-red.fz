@@ -83,17 +83,17 @@ function par
   }
 }
 
-loadDB@[num] 100.0 3.5;
+loadDB@[num] 100.0 (3.5,0.0);
 assertEq@[string] "Simple SFuzz #1 " (test1 1.0) "succ";
 assertEq@[num]    "Simple SFuzz #2 " (getEpsilon ()) 2.5;
 assertEq@[string] "Simple SFuzz #3 " (test1 2.5) "succ";
 assertEq@[num]    "Simple SFuzz #4 " (getEpsilon ()) 0.0;
 assertEq@[string] "Simple SFuzz #5 " (test1 0.5) "Database is all used up";
 assertEq@[num]    "Simple SFuzz #6 " (getEpsilon ()) 0.0;
-loadDB@[num] 100.0 8.0;
+loadDB@[num] 100.0 (8.0,0.0);
 assertEq@[string] "Simple SFuzz #7 " (test1 3.1) "runRedZone expected a 3.-sensitive function but found a 3.1-sensitive function";
 assertEq@[num]    "Simple SFuzz #8 " (getEpsilon ()) 8.0;
-assertEq@[string] "Simple SFuzz #9 " (test2 2.0) "EEE [  1] Terms in sensitivity are not allowed in the red zone! Found: \"No asserts in red zone\"";
+assertEq@[string] "Simple SFuzz #9 " (test2 2.0) "TYPE FAIL: (rimitives.fz:81.09) EEE [  1] Terms in sensitivity are not allowed in the red zone! Found: \"No asserts in red zone\"";
 
 assertTyCheck@[list(num)]@[num] "Simple SFuzz #10" true 1.5 (innerProdFC testLst);
 assertTyCheck@[num]@[fuzzy num] "Simple SFuzz #11" true 2.0 (seq 1 1 (add_noise 1) (fun (x : num) { add_noise 1 }));
@@ -107,10 +107,12 @@ assertTyCheck@[(num, num)]@[fuzzy (num, num)] "Simple SFuzz #14" false 1.5 (par 
 
 
 
-loadDB@[num] 1 1;
+loadDB@[num] 1 (1.0,0.0);
 assertTyCheck@[num]@[fuzzy num] "Simple SFuzz #15" false 1 test3;
-assertEq@[(string + num)] "Simple SFuzz #16" (runFuzz@[num]@[num] test3) (inl@[string]@[num]{"EEE [  1] Cannot satisfy constraint ∞ <= 1.000"});
+assertEq@[(string + num)] "Simple SFuzz #16" (runFuzz@[num]@[num] test3) 
+    (inl@[string]@[num]{"TYPE FAIL: (imple-red.fz:28.17) EEE [  1] Cannot satisfy constraint ∞ <= 1.000"});
 assertTyCheck@[num]@[fuzzy num] "Simple SFuzz #17" false 1 test4;
-assertEq@[(string + num)] "Simple SFuzz #18" (runFuzz@[num]@[num] test4) (inl@[string]@[num]{"EEE [  1] Cannot satisfy constraint ∞ <= 1.000"});
+assertEq@[(string + num)] "Simple SFuzz #18" (runFuzz@[num]@[num] test4) 
+    (inl@[string]@[num]{"TYPE FAIL: (imple-red.fz:39.17) EEE [  1] Cannot satisfy constraint ∞ <= 1.000"});
 
 

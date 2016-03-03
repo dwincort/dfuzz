@@ -123,5 +123,5 @@ function main (arg : ()) : string {
 
 }
 
-loadDB@[db] (makeDB 2) 5.0;
+loadDB@[db] (makeDB 2) (5.0,0.0);
 main ()

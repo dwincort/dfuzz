@@ -149,14 +149,14 @@ module TypeSens = struct
   open TypeCheckMonad
   
   (* Constants *)
-  let si_zero  = SiConst 0.0
-  let si_nearzero = SiNearZero
+  let si_zero  = SiZero
+  let si_nearzero = SiConst 0.0
   let si_one   = SiConst 1.0
   let si_infty = SiInfty
   
   let rec si_simpl' (si : si) : si checker = match si with
     | SiInfty   -> return @@ si
-    | SiNearZero -> return @@ si
+    | SiZero    -> return @@ si
     | SiConst _ -> return @@ si
     | SiTerm(TmPrim(_, PrimTNum(f)))  -> return @@ SiConst f
     | SiTerm(TmPrim(_, PrimTInt(i)))  -> return @@ SiConst (float_of_int i)
@@ -168,8 +168,8 @@ module TypeSens = struct
         begin match si1, si2 with
           | SiInfty, _  -> return @@ SiInfty
           | _, SiInfty  -> return @@ SiInfty
-          | SiNearZero, s  -> return @@ s
-          | s, SiNearZero  -> return @@ s
+          | SiZero, s -> return @@ s
+          | s, SiZero -> return @@ s
           | SiConst x1, SiConst x2 -> return @@ SiConst (x1 +. x2)
           | _   -> fail dummyinfo @@ Internal "Bad state when adding sensitivities"
         end
@@ -177,12 +177,10 @@ module TypeSens = struct
         si_simpl' si1 >>= fun si1 ->
         si_simpl' si2 >>= fun si2 ->
         begin match si1, si2 with
-          | SiConst 0.0, _ -> return @@ si_zero
-          | _, SiConst 0.0 -> return @@ si_zero
+          | SiZero, _ -> return @@ si_zero
+          | _, SiZero -> return @@ si_zero
           | SiInfty, _  -> return @@ SiInfty
           | _, SiInfty  -> return @@ SiInfty
-          | SiNearZero, _  -> return @@ SiNearZero
-          | _, SiNearZero  -> return @@ SiNearZero
           | SiConst x1, SiConst x2 -> return @@ SiConst (x1 *. x2)
           | _   -> fail dummyinfo @@ Internal "Bad state when multiplying sensitivities"
         end
@@ -192,10 +190,9 @@ module TypeSens = struct
         begin match si1, si2 with
           | SiInfty, _            -> return @@ SiInfty
           | _, SiInfty            -> return @@ SiInfty
-          | SiConst 0.0, SiConst 0.0 -> return @@ si_zero
+          | SiZero, s -> return @@ s
+          | s, SiZero -> return @@ s
           | SiConst x, SiConst y  -> return @@ SiConst (max x y)
-          | SiNearZero, s  -> return @@ s
-          | s, SiNearZero  -> return @@ s
           | _   -> fail dummyinfo @@ Internal "Bad state when LUBing sensitivities"
         end
     
@@ -231,8 +228,8 @@ module TypeSens = struct
     si_simpl' sil >>= fun sil ->
     si_simpl' sir >>= fun sir ->
     let res = match sil, sir with
-      | _, SiInfty -> true
-      | SiNearZero, _ -> true
+      | _, SiInfty  -> true
+      | SiZero, _   -> true
       | SiConst l, SiConst r -> (l <= r +. 0.0001) (*FIXME: This is here because of a floating point issue, but it's a vulnerability*)
       | _, _ -> false
     in if res then return () else fail i @@ SensError(sil, sir)

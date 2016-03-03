@@ -34,6 +34,7 @@ let pp_term = limit_boxes pp_term
 (* State monad for the context for interpreting *)
 module InterpMonad = struct
   open Ctx
+  open Composedp
     
   let (>>=) (m : 'a interpreter) (f : 'a -> 'b interpreter) : 'b interpreter =
     fun ((db, pe, plst) as inp) -> match m inp with
@@ -54,7 +55,7 @@ module InterpMonad = struct
   let rec mapMSi (f : term -> term interpreter) (si : si) : si interpreter = 
     match si with
     | SiInfty         -> return @@ si
-    | SiNearZero      -> return @@ si
+    | SiZero          -> return @@ si
     | SiConst c       -> return @@ si
     | SiTerm  t       -> f t >>= fun x -> return @@ SiTerm x
     | SiAdd  (s1, s2) -> mapMSi f s1 >>= fun s1 -> mapMSi f s2 >>= fun s2 -> return @@ SiAdd  (s1, s2)
@@ -118,29 +119,33 @@ module InterpMonad = struct
   let attemptRedZone (sens : epsilon) : bool interpreter =
     fun (db, _, _) -> match db with
       | None -> (db, Error "**Interpreter** Tried to store a sensitivity when no DB was loaded")
-      | Some (db, eps, silist) -> let sum = List.fold_left (+.) 0. silist in
-            if sum +. sens > eps
-            then (Some (db, eps, (eps -. sum) :: silist), Ok false)
-            else (Some (db, eps, sens :: silist), Ok true)
+      | Some (db, ((ebudget,dbudget) as budget), _, silist) -> 
+          let silist' = (sens, 0.0) :: silist           in
+          let (e,d) = minEDWithinBudget budget silist'  in
+          let eRemain = max 0.0 (ebudget -. e)          in
+          let dRemain = max 0.0 (dbudget -. d)          in
+          (Some (db, budget, (eRemain,dRemain), silist'), Ok (e <= ebudget && d <= dbudget))
   
   let getDB : term interpreter = 
     fun (o, _, _) -> match o with
       | None -> (o, Error "**Interpreter** No database loaded")
-      | Some (db,_,_) -> (o, Ok db)
+      | Some (db,_,_,_) -> (o, Ok db)
   
-  let storeDB (db : term) (budget : epsilon) : unit interpreter = 
+  let storeDB (db : term) (budget : ed) : unit interpreter = 
     fun (db_init, pe, _) -> if Option.is_some pe
       then begin interp_messageNoFi 1 "Trying to storeDB in red zone.  Quietly skipping ...";
                  (db_init, Ok ())
-      end else (Some (db, budget, []), Ok ())
+      end else (Some (db, budget, budget, []), Ok ())
   
   let getDelta : float interpreter = 
-    return 0.0
+    fun (db, _, _) -> match db with
+      | None -> (db, Error "**Interpreter** Tried to get remaining epsilon budget when no DB was loaded")
+      | Some (_, _, (_, del), _) -> (db, Ok del)
   
   let getEpsilon : epsilon interpreter = 
     fun (db, _, _) -> match db with
       | None -> (db, Error "**Interpreter** Tried to get remaining epsilon budget when no DB was loaded")
-      | Some (_, eps, silist) -> (db, Ok (eps -. (List.fold_left (+.) 0. silist)))
+      | Some (_, _, (eps, _), _) -> (db, Ok eps)
   
   let getPrimDefs : ((string * primfun) list) interpreter = 
     fun (db, _, plst) -> (db, Ok plst)

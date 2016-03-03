@@ -47,7 +47,7 @@ let rec si_map
     let fsi si = si_map ftm si in
     match si with
     | SiInfty         -> si
-    | SiNearZero      -> si
+    | SiZero          -> si
     | SiConst c       -> si
     | SiTerm  t       -> SiTerm (ftm t)
     | SiAdd  (s1, s2) -> SiAdd  (fsi s1, fsi s2)
@@ -346,9 +346,9 @@ and tyEq (t1 : ty) (t2 : ty) : bool =
 and siEq (s1 : si) (s2 : si) : bool = 
   match s1, s2 with
   | SiInfty, SiInfty -> true
-  | SiNearZero, SiNearZero -> true
-  | SiNearZero, SiConst f -> f = 0.0
-  | SiConst f, SiNearZero -> f = 0.0
+  | SiZero, SiZero -> true
+  | SiZero, SiConst f2 -> 0.0 = f2
+  | SiConst f1, SiZero -> f1 = 0.0
   | SiConst f1, SiConst f2 -> f1 = f2
   | SiTerm t1, SiTerm t2 -> tmEq t1 t2
   | SiAdd(si1a, si1b),

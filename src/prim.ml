@@ -246,6 +246,43 @@ module Creation = struct
     (op : 'a -> 'b -> 'c -> 'd -> 'e -> 'f interpreter) (* The operation to perform *)
     : primfun = fun_of_5args_with_type_i name efst esnd ethd efth efft mk (fun _ty -> op)
 
+  let fun_of_7args_with_type_i
+    (name : string)                           (* The name of the function - for debug purposes *)
+    (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
+    (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
+    (ethd : string -> term -> 'c interpreter) (* An extractor for the third argument *)
+    (efth : string -> term -> 'd interpreter) (* An extractor for the fourth argument *)
+    (efft : string -> term -> 'e interpreter) (* An extractor for the fifth argument *)
+    (esxh : string -> term -> 'f interpreter) (* An extractor for the sixth argument *)
+    (esvh : string -> term -> 'g interpreter) (* An extractor for the seventh argument *)
+    (mk : info -> 'h -> term)                 (* A maker for the result *)
+    (op : ty -> 'a -> 'b -> 'c -> 'd -> 'e -> 'f -> 'g -> 'h interpreter)   (* The operation to perform *)
+    : primfun = 
+    PrimFun (fun (ty, tlst) -> match tlst with
+      | ta :: tb :: tc :: td :: te :: tf :: tg :: []
+          -> efst name ta >>= fun a ->
+             esnd name tb >>= fun b ->
+             ethd name tc >>= fun c ->
+             efth name td >>= fun d ->
+             efft name te >>= fun e ->
+             esxh name tf >>= fun f ->
+             esvh name tg >>= fun g ->
+             op ty a b c d e f g >>= fun res -> return (mk di res)
+      | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected 7 arguments but found %a" name (pp_list pp_term) tlst)
+  
+  let fun_of_7args_i
+    (name : string)                           (* The name of the function - for debug purposes *)
+    (efst : string -> term -> 'a interpreter) (* An extractor for the first argument *)
+    (esnd : string -> term -> 'b interpreter) (* An extractor for the second argument *)
+    (ethd : string -> term -> 'c interpreter) (* An extractor for the third argument *)
+    (efth : string -> term -> 'd interpreter) (* An extractor for the second argument *)
+    (efft : string -> term -> 'e interpreter) (* An extractor for the fifth argument *)
+    (esxh : string -> term -> 'f interpreter) (* An extractor for the sixth argument *)
+    (esvh : string -> term -> 'g interpreter) (* An extractor for the seventh argument *)
+    (mk : info -> 'h -> term)                 (* A maker for the result *)
+    (op : 'a -> 'b -> 'c -> 'd -> 'e -> 'f -> 'g -> 'h interpreter)   (* The operation to perform *)
+    : primfun = fun_of_7args_with_type_i name efst esnd ethd efth efft esxh esvh mk (fun _ty -> op)
+
 end
 
 open Creation
@@ -448,7 +485,7 @@ let expMechFun
   : term interpreter = 
     mapM (fun r -> Interpreter.interp (TmApp(di, TmApp(di, quality, r), db)) 
             >>= exNum "expMech"
-            >>= fun q -> return (r, q +. Math.lap (k /. eps))) rbag >>= fun problist ->
+            >>= fun q -> return (r, abs_float q +. Math.lap (k /. eps))) rbag >>= fun problist ->
 (*    Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
       "--- expMech: Probabilities are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) problist));*)
     let (res, _i) = List.fold_left 
@@ -466,7 +503,27 @@ let expMechWithScoreFun
   : (term * float) interpreter = 
     mapM (fun r -> Interpreter.interp (TmApp(di, TmApp(di, quality, r), db)) 
             >>= exNum "expMechWithScore"
-            >>= fun q -> return (r, q +. Math.lap (k /. eps))) rbag >>= fun problist ->
+            >>= fun q -> return (r, abs_float q +. Math.lap (k /. eps))) rbag >>= fun problist ->
+(*    Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
+      "--- expMechWithScore: Probabilities are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) problist));*)
+    let (res, i) = List.fold_left 
+            (fun best r -> if snd r > snd best then r else best)
+            (mkUnit di (), neg_infinity) problist in
+    return (res, i)
+
+let expMechPreWithScoreFun
+  (eps : float)
+  (j : float)
+  (k : float)
+  (preprocess : term)
+  (quality : term)
+  (rbag : term list)
+  (db : term)
+  : (term * float) interpreter = 
+    Interpreter.interp (TmApp(di, preprocess, db)) >>= fun intermediateTerm ->
+    mapM (fun r -> Interpreter.interp (TmApp(di, TmApp(di, quality, r), intermediateTerm)) 
+            >>= exNum "expMechWithScore"
+            >>= fun q -> return (r, abs_float q +. Math.lap (j *. k /. eps))) rbag >>= fun problist ->
 (*    Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
       "--- expMechWithScore: Probabilities are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) problist));*)
     let (res, i) = List.fold_left 
@@ -490,7 +547,7 @@ let expMechUnsafeFun
   : term interpreter = 
     Interpreter.interp (TmApp(di, quality, db)) >>= exBag "expMechUnsafe" >>= fun resbag ->
     mapM (fun t -> Interpreter.interp t >>= exPair exAny exNum "expMechUnsafe") resbag >>= fun rnumlist ->
-    let problist = List.map (fun (r,q) -> (r, q +. Math.lap (k /. eps /. (float_of_int rmod)))) rnumlist in
+    let problist = List.map (fun (r,q) -> (r, abs_float q +. Math.lap (k /. eps /. (float_of_int rmod)))) rnumlist in
 (*    Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
       "--- expMechUnsafe: Scores are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) rnumlist));
     Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
@@ -632,7 +689,7 @@ let prim_list : (string * primfun) list = [
 (* Probability monad operations *)
 ("_return", fun_of_1arg_i "_return" exAny mkAny (fun x -> onlyInFullEval "return" (return x)));
 
-("loadDB", fun_of_2args_i "loadDB" exAny exNum mkUnit storeDB);
+("loadDB", fun_of_2args_i "loadDB" exAny (exPair exNum exNum) mkUnit storeDB);
 
 (* Red zone activation primitives *)
 ("tyCheckFuzz", fun_of_2args_i "tyCheckFuzz" exNum exAny mkAny tyCheckFuzzFun);
@@ -667,6 +724,8 @@ let prim_list : (string * primfun) list = [
 
 ("expMech", fun_of_5args_i "expMech" exNum exNum exFun exBag exAny mkAny expMechFun);
 ("expMechWithScore", fun_of_5args_i "expMechWithScore" exNum exNum exFun exBag exAny (mkPair mkAny mkNum) expMechWithScoreFun);
+("expMechPreWithScore", fun_of_7args_i "expMechPreWithScore" 
+    exNum exNum exNum exFun exFun exBag exAny (mkPair mkAny mkNum) expMechPreWithScoreFun);
 ("expMechUnsafe", fun_of_5args_i "expMechUnsafe" exNum exNum exInt exFun exAny mkAny expMechUnsafeFun);
 
 (* Load data from external file *)

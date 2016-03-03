@@ -41,12 +41,17 @@ type ('a,'b) result = | Ok of 'a
                       | Error of 'b
 
 type epsilon = float
+type delta = float
+type ed = (epsilon * delta)
 
 (* Sensitivities *)
 type si =
   | SiInfty
-  | SiNearZero
-  | SiConst of float
+  | SiZero
+    (* SiConst 0.0 is different than SiZero.  
+        SiZero * SiInfty = SiZero, but
+        SiConst 0.0 * SiInfty = SiInfty *)
+  | SiConst of float 
   | SiTerm  of term
   | SiAdd   of si * si
   | SiMult  of si * si
@@ -149,15 +154,23 @@ and  term =
 (* Primitive functions *)
 and  primfun = PrimFun of (ty * term list -> term interpreter)
 
+(* Data about the database.  The components are:
+    - the database,
+    - its budget, 
+    - the currently calculated remaining budget, and
+    - the list of red zone computation sensitivities so far performed. *)
+and  dbdata = (term * ed * ed * ed list)
+
+
 (* Interpreter monad *)
 (* TODO: The primfun list should be handled by the parser *)
 and  'a interpreter = 
-    (((term * epsilon * epsilon list) option)   (* The database, its budget, and the list of red zone computation sensitivities performed so far. *)
+    ( (dbdata option)           (* The database data. *)
     * (context * bool) option   (* The option part represents whether we are in partial evaluation mode or not;
                                    if so, the context is the type context for type inference, and the bool indicates if we are under an unknown branch. *)
     * (string * primfun) list)  (* The primfun map is the set of primitive function implementations. *)
-   -> ((term * epsilon * epsilon list) option   (* The database, its budget, and the list of red zone computation sensitivities as output. *)
-    * ('a, string) result)      (* the output is either an Ok value or an error with a string. *)
+   -> (dbdata option            (* The database data as output. *)
+    * ('a, string) result)      (* The output is either an Ok value or an error with a string. *)
 
 (* Contexts for parsing and type checking *)
 and  context =

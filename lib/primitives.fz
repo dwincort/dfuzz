@@ -98,7 +98,7 @@ primitive return   forall(A)   (x : A)                            : fuzzy A { "_
 typedef delta = num;
 typedef epsilon = num;
 
-primitive loadDB forall(DB) (db : DB) (budget : epsilon) : () { "loadDB" }
+primitive loadDB forall(DB) (db : DB) (budget : (epsilon, delta)) : () { "loadDB" }
 
 primitive tyCheckFuzz 
   forall(DB,A) 
@@ -158,13 +158,25 @@ primitive expMechWithScore
   (db :[[2 * eps]] DB) 
   : fuzzy (A, num) { "expMechWithScore" }
 
+// A version of expMechWithScore that does a preprocessing step
+primitive expMechPreWithScore
+  forall(A,DB,P)
+  (eps : num)
+  (j : num)
+  (k : num)
+  (preprocess : DB -o[[j]] P)
+  (quality : A -> P -o[[k]] num) 
+  (rs : A bag) 
+  (db :[[2 * eps]] DB) 
+  : fuzzy (A, num) { "expMechPreWithScore" }
+
 primitive expMechUnsafe
   forall(A,DB)
   (eps : num)
   (k   : num)
   (r   : int)
   (quality : DB -o[[k]] ((A,num) bag)) 
-  (db :[[eps]] DB) 
+  (db :[[2 * eps]] DB) 
   : fuzzy A { "expMechUnsafe" }
 
 ////////////////////////////////////////////////////////////////////////

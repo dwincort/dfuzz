@@ -15,7 +15,7 @@ let parser_error   fi = Support.Error.error_msg   Support.Options.Parser fi
 let parser_warning fi = Support.Error.message   1 Support.Options.Parser fi
 let parser_info    fi = Support.Error.message   2 Support.Options.Parser fi
 
-let si_zero  = SiConst 0.0
+let si_zero  = SiZero
 let si_one   = SiConst 1.0
 let si_infty = SiInfty
 
@@ -440,7 +440,7 @@ MaybeSensitivity:
     /* nothing */
       { fun _cx -> si_infty }
   | LBRACK RBRACK
-      { fun _cx -> SiConst 1.0 }
+      { fun _cx -> si_one }
   | LBRACK SensTerm RBRACK
       { $2 }
 
@@ -478,7 +478,7 @@ ComplexType :
   | AType ADD ComplexType
       { fun ctx -> TyUnion($1 ctx, $3 ctx) }
   | AType LOLLIPOP ComplexType
-      { fun ctx -> TyLollipop($1 ctx, SiConst 1.0, $3 (extend_var "__dummy" ctx)) }
+      { fun ctx -> TyLollipop($1 ctx, si_one, $3 (extend_var "__dummy" ctx)) }
   | AType LOLLIPOP LBRACK SensTerm RBRACK ComplexType
       { fun ctx -> TyLollipop($1 ctx, $4 ctx, $6 (extend_var "__dummy" ctx)) }
   | FUZZY Type

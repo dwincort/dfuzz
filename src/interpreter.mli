@@ -35,7 +35,7 @@ module InterpMonad : sig
   
   val getDB : term interpreter
   
-  val storeDB : term -> epsilon -> unit interpreter
+  val storeDB : term -> ed -> unit interpreter
   
   val getDelta : float interpreter
   

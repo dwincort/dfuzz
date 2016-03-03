@@ -49,8 +49,8 @@ function rowop
     // 0 <= y + -mew + thetanorm <= 2*thetanorm + 1
     thetanorm = absum theta;
     list_map@[clipped]@[clipped] (fun (x : clipped) : clipped { 
-        temp = (fromClip y - mew + thetanorm) * (fromClip x);
-        clip (temp / d)
+        temp = (fromClip y - mew) * (fromClip x);
+        clip ((temp + thetanorm) / d)
     }) rlst
 }
 
@@ -64,6 +64,10 @@ function gdRedAllAtOnce
     len = length@[num] theta;
     thetanorm = absum theta;
     
+    // We're going to need the size of the database to scale our output 
+    // values properly.
+    n = bagsize@[(clipped, clist)] db;
+    
     // Map over the database using the above "rowop" function then sum.  
     // This function will get us the information we need, but it will shift 
     // the calculated values in the bag to the range [0,1] so 
@@ -72,13 +76,15 @@ function gdRedAllAtOnce
     
     // Because the above result was shifted to make sure all values would be 
     // between 0 and 1, we need to recover the results we want.  We must 
-    // multiply the result by d.
-    res2 = list_lmap@[num]@[num] d (scale d) res1;
+    // multiply the result by d and add n*thetanorm.
+    res2 = list_lmap@[num]@[num] d (fun (x :[[d+thetanorm]] num) : num {
+        (scale d x) - (scale thetanorm n) })
+        res1;
     
     // The result of the above map (res2) is the exact new correlation vector theta.
     // We need to add noise to each element so that we can return it.
     // In order to end up eps-sensitive, we must add (eps / d) noise.
-    eps' = eps / d / len;
+    eps' = eps / (d+thetanorm) / len;
     res3 = list_lmap@[num]@[fuzzy num] eps' (add_noise eps') res2;
     
     // Next, we convert from a list of fuzzy nums to a fuzzy list of nums, which 
@@ -108,24 +114,28 @@ function gdRedSteps
     len = length@[num] theta;
     thetanorm = absum theta;
     
+    // We're going to need the size of the database to scale our output 
+    // values properly.
+    n = bagsize@[(clipped, clist)] db;
+    
     // Map over the database using the above "rowop" function then sum.  
     // This function will get us the information we need, but it will shift 
     // the calculated values in the bag to the range [0,1] so 
     // that we can sum them.
     res1 = bagsum (bagmap@[(clipped, clist)]@[clipped] 
               (fun (row : (clipped, clist)) {
-                  index@[clipped] (clip 0.0) i (rowop theta d row) })
+                  index@[clipped] (clip (thetanorm/d)) i (rowop theta d row) })
               db);
     
     // Because the above result was shifted to make sure all values would be 
     // between 0 and 1, we need to recover the results we want.  We must 
-    // multiply the result by d.
-    res2 = scale d res1;
+    // multiply the result by d and add n*thetanorm.
+    res2 = (scale d res1) - (scale thetanorm n);
     
     // The result of the above map (res2) is the exact new correlation vector theta.
     // We need to add noise to each element so that we can return it.
     // In order to end up eps-sensitive, we must add (eps / d) noise.
-    eps' = eps / d;
+    eps' = eps / (d+thetanorm);
     sample res3 = add_noise eps' res2;
     
     // After that, we multiply by 2*eta.  Because this is done after adding noise, we do not 
@@ -213,9 +223,9 @@ db = (db = listbagFromFile@[clipped] "examples/data/census-income-cont-clip-data
 
 
 // WHITE ZONE
-loadDB@[db] db 500;
+loadDB@[db] db (500, 0.1);
 dbsize = bagsize@[(clipped, clist)] db;
-gdGreenSteps 10 (3/dbsize) (replicate@[num] 0.0 8) 30
+gdGreenSteps 1 (1/dbsize) (replicate@[num] 0.0 8) 30
 
 
 
