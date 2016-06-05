@@ -27,14 +27,11 @@ Feature Requests:
     Currently, there is no syntax support for multiplication or division of integers.  That is, one can use .+ and .- for 
     integral addition and subtraction, but one cannot use .* or ./ for multiplication or division.  This will affect 
     parser and likely little else.
-- 2/22/2016
-    Currently, there is one "primitives" fuzz module in lib, and there are multiple lib-*** fuzz modules in examples.  The 
-    primitives module should be (and is) included by default, but the lib modules are not.  The lib-bags module should probably 
-    be included by default (as it has a number of actual primitive functions in it), but at the very least, the lib-*** files 
-    should be moved to the lib directory, and any "includes" should automatically include the lib directory in the path of 
-    files searched.
 - 2/23/2016
     Add better type inference.
+- 4/1/2016
+    During partial evaluation, do not replace let statements unless they are values
+
 
 
 Extended Documentation for in-code comments

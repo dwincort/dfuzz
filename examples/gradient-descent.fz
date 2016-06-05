@@ -12,10 +12,15 @@ the label, and the parameters are indexed 1 through k.
 
 typedef nlist = list(num);
 typedef clist = list(clipped);
-typedef db = (clipped, clist) bag;
+typedef cvec = clipped vector;
+typedef nvec = num vector;
+typedef db = (clipped, cvec) bag;
+
 
 // Finds the sum of the absolute values of the given list.
 absum = fun (l : list(num)) : num { list_lfoldl@[num]@[num] (fun (accum :[] num) { fun (x :[] num ) { accum + (op_abs x) } }) 0 l };
+
+absumV = fun (v : nvec) : num { vsum (vmap@[num]@[num] op_abs v) };
 
 // Creates a list of length n with the value x for every entry.
 function replicate forall(A) (x : A) (n : int) : list(A) {
@@ -23,68 +28,69 @@ function replicate forall(A) (x : A) (n : int) : list(A) {
 }
 
 
-// Inner Product with a Fixed length and a Constant first list
-function innerProdFC
-  (v1 : list(num))
-  (v2 :[[absum v1]] list(num))
-  : num {
-    case unfold v1 of {
-      inl(_) => 0.0
-    | inr(nns) => let (n,ns) = nns;
-                  let (c,cs) = uncons@[num] 0.0 v2;
-                  (scale n c) + (innerProdFC ns cs)
-    }
+function rowop
+  (theta : nvec)
+  (row : (clipped, cvec))
+  : cvec {
+    let (y,rlst) = row;
+    mew = clip (vectorIP theta rlst);
+    // 0 <= mew <= 1
+    // -1 <= y - mew <= 1
+    vmap@[clipped]@[clipped] (fun (x : clipped) : clipped { 
+        temp = (fromClip y - mew) * (fromClip x);
+        clip ((temp + 1) / 2)
+    }) rlst
 }
 
-      
-function rowop
-  (theta : nlist)
-  (d : num)
-  (row : (clipped, clist))
-  : clist {
+function rowopMSE
+  (theta : nvec)
+  (row : (clipped, cvec))
+  : clipped {
     let (y,rlst) = row;
-    mew = innerProdFC theta rlst;
-    // -thetanorm <= -mew <= thetanorm
-    // 0 <= -mew + thetanorm <= 2*thetanorm
-    // 0 <= y + -mew + thetanorm <= 2*thetanorm + 1
-    thetanorm = absum theta;
-    list_map@[clipped]@[clipped] (fun (x : clipped) : clipped { 
-        temp = (fromClip y - mew) * (fromClip x);
-        clip ((temp + thetanorm) / d)
-    }) rlst
+    mew = clip (vectorIP theta rlst);
+    // 0 <= mew <= 1
+    // -1 <= y - mew <= 1
+    r = y - mew;
+    clip (r * r)
+}
+
+function calcMSE (eps : num) (theta : nvec) (db :[[eps]] db) : fuzzy num {
+  n = bagsum (bagmap@[(clipped, cvec)]@[clipped] (rowopMSE theta) db);
+  add_noise eps n
 }
 
 function gdRedAllAtOnce
   (eps : num)
-  (d   : num)
   (eta : num)
-  (theta : nlist)
+  (theta : nvec)
   (db :[[eps]] db)
-  : fuzzy nlist {
-    len = length@[num] theta;
-    thetanorm = absum theta;
+  : fuzzy nvec {
+    len = vsize@[num] theta;
+    thetanorm = absumV theta;
     
     // We're going to need the size of the database to scale our output 
     // values properly.
-    n = bagsize@[(clipped, clist)] db;
+    n = bagsize@[(clipped, cvec)] db;
     
     // Map over the database using the above "rowop" function then sum.  
     // This function will get us the information we need, but it will shift 
     // the calculated values in the bag to the range [0,1] so 
     // that we can sum them.
-    res1 = bagsumL len (bagmap@[(clipped, clist)]@[clist] (rowop theta d) db);
+    res1 = bagsumV len (bagmap@[(clipped, cvec)]@[cvec] (rowop theta) db);
+    
+//     debug (showList@[num] showNum (vectorToList res1));
     
     // Because the above result was shifted to make sure all values would be 
     // between 0 and 1, we need to recover the results we want.  We must 
     // multiply the result by d and add n*thetanorm.
-    res2 = list_lmap@[num]@[num] d (fun (x :[[d+thetanorm]] num) : num {
-        (scale d x) - (scale thetanorm n) })
-        res1;
+    res2 = list_lmap@[num]@[num] 2 (fun (x :[[2]] num) : num {
+        (scale 2 x) - n })
+        (vectorToList res1);
     
     // The result of the above map (res2) is the exact new correlation vector theta.
     // We need to add noise to each element so that we can return it.
     // In order to end up eps-sensitive, we must add (eps / d) noise.
-    eps' = eps / (d+thetanorm) / len;
+    eps' = eps / 3 / len;
     res3 = list_lmap@[num]@[fuzzy num] eps' (add_noise eps') res2;
     
     // Next, we convert from a list of fuzzy nums to a fuzzy list of nums, which 
@@ -99,43 +105,39 @@ function gdRedAllAtOnce
     // our new estimate for theta. (Note that this is an addition not a subtraction 
     // because the result vector is actually the negation of the gradient descent 
     // derivative.
-    return (zipWith@[num]@[num]@[num] op_add theta res5)
+    return (listToVector@[num] (zipWith@[num]@[num]@[num] op_add (vectorToList theta) res5))
     
 }
 
 function gdRedSteps
   (i   : int)
   (eps : num)
-  (d   : num)
   (eta : num)
-  (theta : nlist)
+  (theta : nvec)
   (db :[[eps]] db)
   : fuzzy num {
-    len = length@[num] theta;
-    thetanorm = absum theta;
-    
     // We're going to need the size of the database to scale our output 
     // values properly.
-    n = bagsize@[(clipped, clist)] db;
+    n = bagsize@[(clipped, cvec)] db;
     
     // Map over the database using the above "rowop" function then sum.  
     // This function will get us the information we need, but it will shift 
     // the calculated values in the bag to the range [0,1] so 
     // that we can sum them.
-    res1 = bagsum (bagmap@[(clipped, clist)]@[clipped] 
-              (fun (row : (clipped, clist)) {
-                  index@[clipped] (clip (thetanorm/d)) i (rowop theta d row) })
+    res1 = bagsum (bagmap@[(clipped, cvec)]@[clipped] 
+              (fun (row : (clipped, cvec)) {
+                  vindex@[clipped] (clip 0.5) i (rowop theta row) })
               db);
     
     // Because the above result was shifted to make sure all values would be 
     // between 0 and 1, we need to recover the results we want.  We must 
     // multiply the result by d and add n*thetanorm.
-    res2 = (scale d res1) - (scale thetanorm n);
+    res2 = (scale 2 res1) - n;
     
     // The result of the above map (res2) is the exact new correlation vector theta.
     // We need to add noise to each element so that we can return it.
     // In order to end up eps-sensitive, we must add (eps / d) noise.
-    eps' = eps / (d+thetanorm);
+    eps' = eps / 3;
     sample res3 = add_noise eps' res2;
     
     // After that, we multiply by 2*eta.  Because this is done after adding noise, we do not 
@@ -153,79 +155,93 @@ function gdRedSteps
 function gdGreenSteps
   (eps : num)
   (eta : num)
-  (theta : nlist)
-  (numIters : int)
+  (theta : nvec)
+  (threshold : num)
+  (prevMSE : num)
   : string {
     e = getEpsilon ();
-    print ("We have "^showNum e^"*ε budget remaining and have so far produced theta="^showList@[num] showNum theta);
-    if (numIters <= 0) then {
-      showList@[num] showNum theta
-    } else {
-      thetanorm = absum theta;
-      print ("|theta|="^showNum thetanorm);
-      d = (2*thetanorm + 1);
-      // The maximum value for d should be (2*|theta| + 1), but if the rows in the database behave 
-      // nicely, it can be, perhaps, (|theta|/5 + 1).  Note that this means there might be actual 
-      // clipping happening.
-      len = length@[num] theta;
-      function stepEachParam (thetanew : nlist) (param : int) : string {
-          if param >= len then {
-              gdGreenSteps eps eta thetanew (numIters .- 1)
-          } else {
-              rz = runFuzz'@[db]@[num] eps (gdRedSteps param eps d eta theta);
-              case rz of {
-                inl(s) => s
-              | inr(iUpdate) => print ("Parameter "^showNum param^" calculated to change: "^showNum iUpdate);
-                                stepEachParam (performAt@[num] param (op_add iUpdate) thetanew) (param .+ 1)
+    print ("We have "^showNum e^"*ε budget remaining and have so far produced theta="^showVec (vmap@[num]@[string] showNum theta));
+    rz = runFuzz'@[db]@[num] eps (calcMSE eps theta);
+    case rz of {
+      inl(s) => s
+    | inr(mse) => 
+        print ("Current MSE = "^showNum mse);
+        if mse*threshold > prevMSE then {
+          showVec (vmap@[num]@[string] showNum theta)
+        } else {
+          thetanorm = absumV theta;
+          print ("|theta|="^showNum thetanorm);
+          len = vsize@[num] theta;
+          function stepEachParam (thetanew : nvec) (param : int) : string {
+              if param >= len then {
+                  gdGreenSteps eps eta thetanew threshold mse
+              } else {
+                  rz = runFuzz'@[db]@[num] eps (gdRedSteps param eps eta theta);
+                  case rz of {
+                    inl(s) => s
+                  | inr(iUpdate) => print ("Parameter "^showNum param^" calculated to change: "^showNum iUpdate);
+                                    stepEachParam (vperformAt@[num] param (op_add iUpdate) thetanew) (param .+ 1)
+                  }
               }
           }
-      }
-      stepEachParam theta 0
+          stepEachParam theta 0
+        }
     }
 }
 
 function gdGreen
   (eps : num)
   (eta : num)
-  (theta : nlist)
+  (theta : nvec)
+  (prevMSE : num)
   (numIters : int)
   : string {
     e = getEpsilon ();
-    print ("We have "^showNum e^"*ε budget remaining and have so far produced theta="^showList@[num] showNum theta);
-    if (numIters <= 0) then {
-      showList@[num] showNum theta
-    } else {
-      thetanorm = absum theta;
-      print ("|theta|="^showNum thetanorm);
-      d = (2*thetanorm + 1);
-      // The maximum value for d should be (2*|theta| + 1), but if the rows in the database behave 
-      // nicely, it can be, perhaps, (|theta|/5 + 1).  Note that this means there might be actual 
-      // clipping happening.
-      rz = runFuzz'@[db]@[nlist] eps (gdRedAllAtOnce eps d eta theta);
-      case rz of {
-        inl(s) => s
-      | inr(theta') => gdGreen eps eta theta' (numIters .- 1)
-      }
+    print ("We have "^showNum e^"*ε budget remaining and have so far produced theta="^showVec (vmap@[num]@[string] showNum theta));
+    rz = runFuzz'@[db]@[num] (10*eps) (calcMSE (10*eps) theta);
+    case rz of {
+      inl(s) => s
+    | inr(mse) => 
+        print ("Current MSE (calculated with "^showNum (10*eps)^"*ε noise) = "^showNum mse);
+        if numIters <= 0 then {
+          showVec (vmap@[num]@[string] showNum theta)
+        } else {
+          thetanorm = absumV theta;
+          print ("|theta|="^showNum thetanorm);
+          len = vsize@[num] theta;
+          rz = runFuzz'@[db]@[nvec] (len*eps) (gdRedAllAtOnce (len*eps) eta theta);
+          case rz of {
+            inl(s) => s
+          | inr(theta') => gdGreen eps eta theta' mse (numIters .- 1)
+          }
+        }
     }
 }
 
-
-
-
-db = (db = listbagFromFile@[clipped] "examples/data/census-income-cont-clip-data-short.data" ",";
-      db = bagmap@[clist]@[(clipped,clist)] (uncons@[clipped] (clip 0)) db;
-      db);
-// db = (db = listbagFromFile@[num] "examples/data/baglist2.dat" "[ \\t]+";
-//       db = bagmap@[nlist]@[clist]
-//             (fun (l : nlist) : clist {
-//               list_map@[num]@[clipped] (fun (x : num) : clipped { clip (x / 10.0) }) l}) db;
-//       bagmap@[clist]@[(clipped,clist)] (uncons (clip 0.0)) db);
+function dbRowSetup (v : cvec) : (clipped, cvec) {
+    let (y,cs) = vuncons@[clipped] (clip 0) v;
+    y' = if y < 0.125 then { clip 0 } else { clip 1 };
+    (y',cs)
+}
 
 
 // WHITE ZONE
-loadDB@[db] db (500, 0.1);
-dbsize = bagsize@[(clipped, clist)] db;
-gdGreenSteps 1 (1/dbsize) (replicate@[num] 0.0 8) 30
-
-
+function main (dbMaxSize : int) (eps : num) (fn : string) : string {
+  db = fun (u:()) {(db = vectorbagFromFile dbMaxSize fn "[ \\t]+";
+        db = bagmap@[cvec]@[(clipped,cvec)] dbRowSetup db;
+        db)};
+  loadDB@[db] db (10000, 0.00001);
+  dbsize = dbMaxSize; //bagsize@[(clipped, cvec)] db;
+  numIters = 30;
+  eta = 0.5;
+  print "Gradient Descent";
+  print ("ε per iteration = "^showNum eps);
+  print ("dbsize = "^showNum dbsize);
+  print ("Number of iterations = "^showNum numIters);
+  print ("eta = "^showNum eta^"/"^showNum dbsize);
+  print ("Labels *are* being set to 0 for <50k and 1 for greater.");
+  theta = listToVector@[num] (replicate@[num] 0.0 145);
+  gdGreen eps (eta/dbsize) theta dbsize numIters
+}
+main
 

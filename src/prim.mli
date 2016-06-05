@@ -8,4 +8,6 @@
 
 open Types
 
+val rzFileName : string ref
+
 val prim_list : (string * primfun) list

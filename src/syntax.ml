@@ -104,6 +104,9 @@ let rec tm_map
   | TmBag(i,             ty,                        tmlst) ->
     TmBag(i, fty ntm nty ty, List.map (ftm ntm nty) tmlst)
   
+  | TmVector(i,             ty,                        tmlst) ->
+    TmVector(i, fty ntm nty ty, List.map (ftm ntm nty) tmlst)
+  
   | TmPair(i,             tm1,             tm2)   ->
     TmPair(i, ftm ntm nty tm1, ftm ntm nty tm2)
   
@@ -281,6 +284,8 @@ let rec tmEq (t1 : term) (t2 : term) : bool =
         (fun (tm1,ty1,si1,_) (tm2,ty2,si2,_) -> tmEq tm1 tm2 && tyEq ty1 ty2 && siEq si1 si2) ttsl1 ttsl2
   | TmBag(_, ty1, tml1), 
     TmBag(_, ty2, tml2) -> tyEq ty1 ty2 && List.for_all2 tmEq tml1 tml2
+  | TmVector(_, ty1, tml1), 
+    TmVector(_, ty2, tml2) -> tyEq ty1 ty2 && List.for_all2 tmEq tml1 tml2
   | TmPair(_, t1a, t1b),
     TmPair(_, t2a, t2b) -> tmEq t1a t2a && tmEq t1b t2b
   | TmTensDest(_, _, _, t1a, t1b),
@@ -365,6 +370,7 @@ and siEq (s1 : si) (s2 : si) : bool =
 let rec tmIsVal (t : term) : bool = match t with
   | TmPrim(_,_)     -> true
   | TmBag(_,_,_)    -> true
+  | TmVector(_,_,_) -> true
   | TmPair(_,t1,t2) -> tmIsVal t1 && tmIsVal t2
   | TmAmpersand(_, t1, t2)  -> tmIsVal t1 && tmIsVal t2
   | TmLeft(_,t,_)   -> tmIsVal t
@@ -396,6 +402,7 @@ let tmInfo t = match t with
   | TmPrimFun(fi, _, _, _)      -> fi
   
   | TmBag(fi, _, _)             -> fi
+  | TmVector(fi, _, _)          -> fi
 
   | TmPair(fi, _, _)            -> fi
   | TmTensDest(fi,_,_,_,_)      -> fi

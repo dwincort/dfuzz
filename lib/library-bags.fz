@@ -44,18 +44,25 @@ primitive showBag (b : string bag) : string { "showBag" }
 
 
 /*
-  bagFromFile : string -> bag DATA
+  bagFromFile : string -> DATA bag
   
   Given a file name, loads the data in the file into a bag
 */
-primitive bagFromFile forall(DATA) (file : string) : DATA bag { "bagFromFile" }
+primitive bagFromFile forall(DATA) (maxsize : int) (file : string) : DATA bag { "bagFromFile" }
 
 /*
-  listbagFromFile : string -> bag list(DATA)
+  listbagFromFile : string -> (list(DATA)) bag
   
   Given a file name, loads the data in the file into a bag
 */
-primitive listbagFromFile forall(DATA) (file : string) (rexp : string) : list(DATA) bag { "listbagFromFile" }
+primitive listbagFromFile forall(DATA) (maxsize : int) (file : string) (rexp : string) : list(DATA) bag { "listbagFromFile" }
+
+/*
+  vectorbagFromFile : string -> (DATA vector) bag
+  
+  Given a file name, loads the data in the file into a bag
+*/
+primitive vectorbagFromFile (maxsize : int) (file : string) (rexp : string) : (clipped vector) bag { "vectorbagFromFile" }
 
 /*
   bagsplit : (A -> bool) -> A bag -o ( A bag x A bag ) 
@@ -126,6 +133,7 @@ primitive bagPairOperate forall(A,B,C,D)
 // }
 
 primitive bagsumL (n : int) (b :[[n]] (list(clipped)) bag) : list(num) { "bagsumL" }
+primitive bagsumV (n : int) (v :[[n]] (clipped vector) bag) : num vector { "bagsumV" }
 
 //////////////////////////////////////////////////////////////////////
 // Utilities

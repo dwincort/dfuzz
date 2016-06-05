@@ -9,10 +9,8 @@ T ::=                                           TYPES
       num                                       "real" numbers
       int                                       integers
       bool                                      booleans
-      clipped                                   numbers whose absolute value is at most 1
-      T set                                     set
+      clipped                                   nonnegative numbers whose value is at most 1
       T bag                                     multiset
-      (T,T) finmap                              finite map
       (T,T)                                     tensor
       (|T,T|)                                   with
       T + T                                     sum
@@ -24,7 +22,6 @@ T ::=                                           TYPES
       mu X => T                                 recursive type
 
 B ::= forall (A, B)                             type variable
-      forall (A : size, B : sens)               sens variables
 
 e ::=                                           EXPRESSIONS
       ()                                        value of unit type
@@ -36,20 +33,16 @@ e ::=                                           EXPRESSIONS
       (|e,e|)                                   with-pairs
       fst e                                     with-pair destructor
       snd e                                     with-pair destructor
-      inl@[T] e                                 injection into with-pair
-      inr@[T] e                                 injection into with-pair
+      inl@[T] e                                 injection into sum
+      inr@[T] e                                 injection into sum
       case e {inl(x) => e | inr(x) => e}        case analysis
-      fuzz t                                    adding noise
-      fuzze n t                                 adding parametric noise
-      primiter n f e                            primitive iteration
       sample x = e; e                           sampled let binding
       return e                                  monadic return
       fun (x:T) {e}                             ordinary function
       fun (x:[r]T) {e}                          r-sensitive function
       fun (x:[]T) {e}                           1-sensitive function
-      function x B (y:T) (z:T) ... : t {e} e    function definition with multiple arguments
+      function x B (y:T) (z:T) ... : t {e} e    recursive function definition with multiple arguments
       e e                                       application
-      e [S]                                     sensitivity/size application
       e@[T]                                     type application
       fold[T] e                                 fold up a recursive type
       unfold e                                  unfold a recursive type
@@ -65,5 +58,4 @@ Examples:
 
 To add:
   - concrete syntax for lists?
-  - polymorphism
-  - datatypes
+  - type inference

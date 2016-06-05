@@ -36,8 +36,6 @@ primitive op_add (op1 :[] num ) (op2 :[] num )  : num { "_add" }
 primitive op_sub (op1 :[] num ) (op2 :[] num )  : num { "_sub" }
 primitive op_mul (op1 : num ) (op2 : num )      : num { "_mul" }
 primitive op_div (op1 : num ) (op2 : num )      : num { "_div" }
-primitive div2 (n : [0.5] num)                  : num { "div2" }
-primitive div3 (n : [0.333] num)                : num { "div3" }
 primitive op_exp (n : num )                     : num { "_exp" }
 primitive op_abs (n :[] num )                   : num { "_abs" }
 primitive cswp (xy :[] (num, num))              : (num, num) { "cswp" }
@@ -76,16 +74,29 @@ function showPair forall(A,B) (pA : A -> string) (pB : B -> string) (p : (A,B)) 
 }
 
 ////////////////////////////////////////////////////////////////////////
+// Vector functions
+primitive vmap forall (A,B) (f : A -> B) (a :[] A vector) : B vector { "vmap" }
+primitive vsize forall(A) (b :[] A vector) : int { "vsize" }
+primitive vsum (b : num vector) : num { "vsum" }
+primitive vindex  forall(A) (def : A) (i : int) (v : A vector) : A { "vindex" }
+primitive vuncons forall(A) (def : A) (v : A vector) : (A, A vector) { "vuncons" }
+primitive vectorIP (v1 : num vector) (v2 : num vector) : num { "vectorIP" }
+primitive vperformAt forall(A) (n :[] int) (f : A -o A) (v :[] A vector) : A vector { "vperformAt" }
+primitive showVec (v :[] string vector) : string { "showVec" }
+
+////////////////////////////////////////////////////////////////////////
 // Testing utilities
 primitive assert 
   (s :[["No asserts in red zone"]] string) 
-  (b :[["No asserts in red zone"]] bool) : () { "assert" }
+  (b :[["No asserts in red zone"]] bool) : () { "_assert" }
 primitive assertEq forall(A) 
   (s  :[["No asserts in red zone"]] string) 
   (a1 :[["No asserts in red zone"]] A)
   (a2 :[["No asserts in red zone"]] A) : () { "assertEq" }
 primitive print 
   (s :[["No printing in red zone"]] string) : () { "print" }
+
+primitive debug (s :[] string) : () { "print" }
 
 ////////////////////////////////////////////////////////////////////////
 // Probability monad, return and bind
@@ -98,7 +109,7 @@ primitive return   forall(A)   (x : A)                            : fuzzy A { "_
 typedef delta = num;
 typedef epsilon = num;
 
-primitive loadDB forall(DB) (db : DB) (budget : (epsilon, delta)) : () { "loadDB" }
+primitive loadDB forall(DB) (db : () -> DB) (budget : (epsilon, delta)) : () { "loadDB" }
 
 primitive tyCheckFuzz 
   forall(DB,A) 

@@ -63,6 +63,7 @@ let reservedWords = [
   ("clipped", fun i -> Parser.CLIPPED i);
   ("set", fun i -> Parser.SET i);
   ("bag", fun i -> Parser.BAG i);
+  ("vector", fun i -> Parser.VECTOR i);
   ("if", fun i -> Parser.IF i);
   ("then", fun i -> Parser.THEN i);
   ("else", fun i -> Parser.ELSE i);

@@ -315,6 +315,7 @@ function showList
   
   Given a file name, loads the data in the file into a list
 */
-primitive listFromFile forall(DATA) (file : string) : list(DATA) { "listFromFile" }
-
+primitive listFromFile forall(DATA) (maxLen : int) (file : string) : list(DATA) { "listFromFile" }
+primitive listToVector forall(A) (l :[] list(A)) : A vector { "listToVector" }
+primitive vectorToList forall(A) (v :[] A vector) : list(A) { "vectorToList" }
 

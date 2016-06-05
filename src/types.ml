@@ -70,6 +70,7 @@ and  ty_prim =
 and  ty_prim1 =
   | Prim1Bag
   | Prim1Fuzzy
+  | Prim1Vector
 
 (* General types *)
 and  ty =
@@ -118,6 +119,7 @@ and  term =
   
   (* Note that the type in the TmBag is the type of the whole bag, NOT just the type of the contents. *)
   | TmBag       of info * ty * term list
+  | TmVector    of info * ty * term list
   | TmPair      of info * term * term
   | TmTensDest  of info * binder_info * binder_info * term * term
   (* & constructor *)

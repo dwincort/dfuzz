@@ -233,6 +233,7 @@ let rec interp t =
      this should be addressed so that it cannot happen, but an easy (although expensive 
      performance-wise) fix would be to interp each element of a bag whenever we see one. *)
   | TmBag(_,_,_) -> return t
+  | TmVector(i,ty,tmlst) -> mapM interp tmlst >>= fun tmlst -> return (TmVector(i, ty, tmlst))
   
   (* Pairs.  Interpret both parts and return them as a pair. *)
   | TmPair(i,t1,t2) -> 

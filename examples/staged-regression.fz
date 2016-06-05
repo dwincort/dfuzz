@@ -12,207 +12,134 @@ the label, and the parameters are indexed 1 through k.
 
 typedef nlist = list(num);
 typedef clist = list(clipped);
-typedef db = (clipped, clist) bag;
+typedef cvec = clipped vector;
+typedef nvec = num vector;
+typedef db = (clipped, cvec) bag;
 
 absum = fun (l : list(num)) : num { list_lfoldl@[num]@[num] (fun (accum :[] num) { fun (x :[] num ) { accum + (op_abs x) } }) 0 l };
+vabsum = fun (v : nvec) : num { vsum (vmap@[num]@[num] op_abs v) };
 
 
 function replicate forall(A) (x : A) (n : int) : list(A) {
   if n <= 0 then { nil@[A] } else { cons@[A] x (replicate@[A] x (n .- 1)) }
 }
 
-function count (start : int) (end : int) : list(int) {
+function count (start : int) (end : int) : int bag {
   if start > end then {
-    nil@[int]
+    emptybag@[int]
   } else {
-    cons@[int] start (count (start .+ 1) end)
+    addtobag@[int] start (count (start .+ 1) end)
   }
 }
 
-// Inner Product with a Fixed length and a Constant first list
-function innerProdFC
-  (v1 : list(num))
-  (v2 :[[absum v1]] list(num))
-  : num {
-    case unfold v1 of {
-      inl(_) => 0.0
-    | inr(nns) => let (n,ns) = nns;
-                  let (c,cs) = uncons@[num] 0.0 v2;
-                  ipres = (scale n c) + (innerProdFC ns cs);
-                  ipres
-    }
-}
 
-      
 
-function pairWithCount
-  forall(A)
-  (n : int)
-  (lst :[] list(A))
-  : list((int,A)) {
-  case unfold lst of {
-    inl(_)   => nil@[(int,A)]
-  | inr(xxs) => let (x,xs) = xxs;
-                cons@[(int,A)] (n,x) (pairWithCount@[A] (n .+ 1) xs)
-  }
-}
 
 function rowop
-  (beta : nlist)
-  (d   : num)
-  (row : (clipped, clist))
-  : clist {
+  (theta : nvec)
+  (row : (clipped, cvec))
+  : cvec {
     let (y,rlst) = row;
-    mew = innerProdFC beta rlst;
-    // -betanorm <= -mew <= betanorm
-    // 0 <= -mew + betanorm <= 2*betanorm
-    // 0 <= y + -mew + betanorm <= 2*betanorm + 1
-    betanorm = absum beta;
-    list_map@[clipped]@[clipped] (fun (x : clipped) : clipped { 
+    mew = clip (vectorIP theta rlst);
+    // 0 <= mew <= 1
+    // -1 <= y - mew <= 1
+    res = vmap@[clipped]@[clipped] (fun (x : clipped) : clipped { 
         temp = (fromClip y - mew) * (fromClip x);
-        clip ((temp + betanorm) / d)
-    }) rlst
+        clip ((temp + 1) / 2)
+    }) rlst;
+//     debug (showVec (vmap@[clipped]@[string] showClipped rlst));
+//     debug (showVec (vmap@[clipped]@[string] showClipped res));
+    res
 }
   
-function stagewiseRedUnsafe
-  (eps : num)
-  (d   : num)
-  (smallconstant : num)
-  (threshold : num)
-  (beta : nlist)
-  (db :[[eps]] db)
-  : fuzzy nlist {
-    len = length@[num] beta;
-    betanorm = absum beta;
-    k = (2 * (d+betanorm) * len);
-    // This function f will be what we pass to the exponential mechanism
-    f = fun (db :[[k]] db) : (((int,num),num) bag) {
-      
-      // We're going to need the size of the database to scale our output 
-      // values properly.
-      n = bagsize@[(clipped, clist)] db;
-      
-      // The main operation is a map then sum over the database using the above "rowop" function
-      res1 = bagsumL len (bagmap@[(clipped, clist)]@[clist] (rowop beta d) db);
-      
-      // Because the above result was shifted to make sure all values would be 
-      // between 0 and 1, we need to recover the results we want.  We must 
-      // multiply the result by d and add n*betanorm.
-      res2 = list_lmap@[num]@[num] d (fun (x :[[d+betanorm]] num) : num {
-        (scale d x) - (scale betanorm n) })
-        res1;
-      
-      // The result of the map is the current correlation vector c.  We pair each value with its index.
-      res3 = pairWithCount@[num] 0 res2;
-      
-      // We massage the data into a proper form for the expMechOnePass function.
-      // Unfortunately, this is 2-sensitive because we need to use the value both 
-      // as a score for the exponential mechanism as well as a result to check its sign.
-      // TODO: Is there a way to reduce the sensitivity because we know that we'll only be using 
-      // the sign of the value?
-      res4 = list_lmap@[(int,num)]@[((int,num),num)] 2 
-        (fun (xy :[2] (int,num)) : ((int,num),num) { 
-            let (i,n) = xy; ((i,n), n) })
-        res3;
-      
-      // Convert the result to a bag and add the threshold value
-      addtobag@[((int,num),num)] ((0 .- 1,threshold), threshold) (listtobag@[((int,num),num)] res4)
-    };
-    // Run the exponential mechanism.
-    sample jcj = expMechUnsafe@[(int,num)]@[db] (eps/2) k len f db;
-    // The result is both the index j and the value of c at j.
-    let (j,cj) = jcj;
-    if (j < 0) then {
-      return beta
-    } else {
-      signedconstant = if cj > 0 then { smallconstant } else { 0 - smallconstant };
-      return@[nlist] (performAt@[num] j (op_add signedconstant) beta)
-    }
-}
 
 function stagewiseRed
   (eps : num)
-  (d   : num)
-  (smallconstant : num)
+  (eta : num)
   (threshold : num)
-  (beta : nlist)
+  (beta : nvec)
   (db :[[eps]] db)
-  : fuzzy nlist {
-    len = length@[num] beta;
-    betanorm = absum beta;
+  : fuzzy nvec {
+    len = vsize@[num] beta;
+    betanorm = vabsum beta;
     
     // We do a preprocessing step in the exponential mechanism to improve runtime.
-    preprocess = fun (db :[[2]] db) : (int, clist bag) {
-      n = bagsize@[(clipped, clist)] db;
-      b = bagmap@[(clipped, clist)]@[clist] (rowop beta d) db;
+    preprocess = fun (db :[[2]] db) : (int, cvec bag) {
+      n = bagsize@[(clipped, cvec)] db;
+      b = bagmap@[(clipped, cvec)]@[cvec] (rowop beta) db;
       (n,b)
     };
     
     // This function will be what we pass to the exponential mechanism to calculate 
     // the quality sccores for the parameters.
-    quality = fun (r : int) { fun (nb :[[d+betanorm]] (int, clist bag)) : num {
+    quality = fun (r : int) { fun (nb :[[3]] (int, cvec bag)) : num {
       if r < 0 then {
         threshold
       } else {
         let (n,b) = nb;
-        res1 = bagsum (bagmap@[clist]@[clipped] (index@[clipped] (clip (betanorm/d)) r) b);
-        (scale d res1) - (scale betanorm n)
+        res1 = bagsum (bagmap@[cvec]@[clipped] (vindex@[clipped] (clip (0.5)) r) b);
+        (scale 2 res1) - n
       }
     }};
     // The indexes plus a -1 value for the threshold
-    rbag = listtobag@[int] (count (0 .- 1) len);
+    rbag = count (0 .- 1) len;
     // Run the exponential mechanism.
-    sample jcj = expMechPreWithScore@[int]@[db]@[(int, clist bag)] 
-        (eps/2) 2 (d+betanorm) preprocess quality rbag db;
+    sample jcj = expMechPreWithScore@[int]@[db]@[(int, cvec bag)] 
+        (eps/2) 2 3 preprocess quality rbag db;
     // The result is both the index j and the value of c at j.
     let (j,cj) = jcj;
     if (j < 0) then {
       return beta
     } else {
-      signedconstant = if cj > 0 then { smallconstant } else { 0 - smallconstant };
-      return@[nlist] (performAt@[num] j (op_add signedconstant) beta)
+      signedconstant = if cj > 0 then { eta } else { 0 - eta };
+      return (vperformAt@[num] j (op_add signedconstant) beta)
     }
 }
 
 function stagewiseGreen
   (eps : num)
-  (smallconstant : num)
+  (eta : num)
   (threshold : num)
   (beta : nlist)
   : string {
     e = getEpsilon ();
     print ("We have "^showNum e^"*ε budget remaining and have so far produced beta="^showList@[num] showNum beta);
     betanorm = absum beta;
-    d = (2*betanorm + 1);
-    // The maximum value for d should be (2*|beta| + 1), but if the rows in the database behave 
-    // nicely, it can be, perhaps, (|beta|/5 + 1).  Note that this means there might be actual 
-    // clipping happening.
-    rz = runFuzz'@[db]@[nlist] eps (stagewiseRedUnsafe eps d smallconstant threshold beta);
+    rz = runFuzz'@[db]@[nvec] eps (stagewiseRed eps eta threshold (listToVector@[num] beta));
     case rz of {
       inl(s) => s
     | inr(beta') =>
+        beta' = vectorToList@[num] beta';
         if (beta == beta') then { showList@[num] showNum beta }
-                           else { stagewiseGreen eps smallconstant threshold beta' }
+                           else { stagewiseGreen eps eta threshold beta' }
     }
 }
 
 
 
-
-// db = (db = listbagFromFile@[clipped] "examples/data/census-income-cont-clip-data-short.data" ",";
-//       db = bagmap@[clist]@[(clipped,clist)] (uncons@[clipped] (clip 0)) db;
-//       db);
-db = (db = listbagFromFile@[num] "examples/data/baglist2.dat" "[ \\t]+";
-      db = bagmap@[nlist]@[clist]
-            (fun (l : nlist) : clist {
-              list_map@[num]@[clipped] (fun (x : num) : clipped { clip (x / 10.0) }) l}) db;
-      db = bagmap@[clist]@[(clipped,clist)] (uncons (clip 0.0)) db;
-      db);
-
+function dbRowSetup (v : cvec) : (clipped, cvec) {
+    let (y,cs) = vuncons@[clipped] (clip 0) v;
+    y' = if y < 0.125 then { clip 0 } else { clip 1 };
+    (y',cs)
+}
 
 // WHITE ZONE
-loadDB@[db] db (1000, 0.1);
-stagewiseGreen 10 0.02 0.05 (replicate@[num] 0.0 8)
-
-
+function main (dbMaxSize : int) (eps : num) (fn : string) : string {
+  db = fun (u:()) {(db = vectorbagFromFile dbMaxSize fn "[ \\t]+";
+        db = bagmap@[cvec]@[(clipped,cvec)] dbRowSetup db;
+        db)};
+  loadDB@[db] db (10000, 0.001);
+  dbsize = dbMaxSize;
+  cutoff = 0.005;
+  eta = 0.01;
+  print "Stagewise Regression";
+  print ("ε per iteration = "^showNum eps);
+  print ("dbsize = "^showNum dbsize);
+  print ("cutoff = "^showNum cutoff);
+  print ("eta = "^showNum eta);
+  print ("Labels *are* being set to 0 for <50k and 1 for greater.");
+  beta = replicate@[num] 0.0 145;
+  stagewiseGreen eps eta (dbsize * cutoff) beta
+}
+main
 

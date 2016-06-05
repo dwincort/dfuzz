@@ -71,12 +71,14 @@ let u_sym x = Symbols.string_of_symbol x
 (**********************************************************************)
 (* Helper functions for pretty printing *)
 
-let pp_list pp fmt l = 
+let pp_list_generic pp pre post inf fmt l = 
   let rec inner fmt l = match l with
-      []         -> fprintf fmt "]"
-    | csx :: []  -> fprintf fmt "%a]" pp csx
-    | csx :: csl -> fprintf fmt "%a,@ %a" pp csx inner csl
-  in fprintf fmt "[%a" inner l
+      []      -> fprintf fmt ""
+    | x :: [] -> fprintf fmt "%a" pp x
+    | x :: xs -> fprintf fmt "%a%s@ %a" pp x inf inner xs
+  in fprintf fmt "%s%a%s" pre inner l post
+
+let pp_list pp = pp_list_generic pp "[" "]" ","
 
 let pp_pair ppl ppr fmt pair = 
   let (l,r) = pair in fprintf fmt "(%a,@ %a)" ppl l ppr r
@@ -147,6 +149,7 @@ and pp_primtype fmt ty = match ty with
 
 and pp_primtype1 fmt ty = match ty with
   | Prim1Bag   -> fprintf fmt "bag"
+  | Prim1Vector-> fprintf fmt "vector"
   | Prim1Fuzzy -> fprintf fmt "@<1>%s" (u_sym Symbols.Fuzzy)
 
 (* Helper for our sensitivity annotated arrows *)
@@ -264,6 +267,7 @@ and pp_term ppf t =
   
   (* Bags *)
   | TmBag(_, ty, tmlst)         -> fprintf ppf "Bag[%a]@ {%a}" pp_type ty (pp_list pp_term) tmlst
+  | TmVector(_, ty, tmlst)         -> fprintf ppf "Vector[%a]@ {%a}" pp_type ty (pp_list pp_term) tmlst
 
   (* Tensor and & *)
   | TmPair(_, tm1, tm2)               -> fprintf ppf "(@[%a@],@ @[%a@])" pp_term tm1 pp_term tm2

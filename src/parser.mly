@@ -174,6 +174,7 @@ let rec remove_quantifiers ty = match ty with
 %token <Support.FileInfo.info> PRIMITIVE
 %token <Support.FileInfo.info> SET
 %token <Support.FileInfo.info> BAG
+%token <Support.FileInfo.info> VECTOR
 %token <Support.FileInfo.info> IF
 %token <Support.FileInfo.info> THEN
 %token <Support.FileInfo.info> ELSE
@@ -467,6 +468,8 @@ MaybeType:
 Type :
     AType BAG
       { fun ctx -> TyPrim1 (Prim1Bag, ($1 ctx)) }
+  | AType VECTOR
+      { fun ctx -> TyPrim1 (Prim1Vector, ($1 ctx)) }
   | MU ID DBLARROW Type
       { fun ctx -> TyMu(nb_tyvar $2.v, $4 (extend_ty_var $2.v ctx)) }
   | ComplexType

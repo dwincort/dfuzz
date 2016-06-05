@@ -9,7 +9,7 @@ l246 = cons@[num] 2.0 (cons@[num] 4.0 (cons@[num] 6.0 nil@[num]));
 l456 = cons@[num] 4.0 (cons@[num] 5.0 (cons@[num] 6.0 nil@[num]));
 l123s = cons@[string] "1" (cons@[string] "2" (cons@[string] "3" nil@[string]));
 
-l123456 = listFromFile@[num] "examples/data/list1.dat";
+l123456 = listFromFile@[num] 100 "examples/data/list1.dat";
 absum = fun (l : list(num)) : num { list_lfoldl@[num]@[num] (fun (accum :[] num) { fun (x :[] num ) { accum + (op_abs x) } }) 0 l };
 
 

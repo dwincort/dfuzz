@@ -13,13 +13,28 @@ open Support.Error
 
 let infile     = ref ("" : string)
 
+let programArgs = ref (None, None, None)
+let setDBMaxSize i = match !programArgs with
+  (_, n, s) -> programArgs := (Some i, n, s)
+let setEpsilon n = match !programArgs with
+  (i, _, s) -> programArgs := (i, Some n, s)
+let setFN s = match !programArgs with
+  (i, n, _) -> programArgs := (i, n, Some s)
+
 let argDefs = [
+  "-dbsize",           Arg.Int  (fun i -> setDBMaxSize i), "Set Database size argument" ;
+  "-e",                Arg.Float (fun n -> setEpsilon n), "Set epsilon argument" ;
+  "-fn",               Arg.String (fun s -> setFN s), "Set filename argument" ;
+  "-rzfile",           Arg.String (fun s -> Prim.rzFileName := s), "Set the name for the redZoneTemp file" ;
+  
+  "--no-noise",        Arg.Unit (fun () -> Math.noNoise := true), "Disable noise, making all laplace calls return 0" ;
+  
   "-v",                Arg.Int  (fun l  -> debug_options := {!debug_options with level = l} ),       "Set printing level to n (1 Warning [2 Info], 3+ Debug)" ;
   "--verbose",         Arg.Int  (fun l  -> debug_options := {!debug_options with level = l} ),       "Set printing level to n (1 Warning [2 Info], 3+ Debug)" ;
-
+  
   "--disable-types",   Arg.Unit (fun () -> comp_disable TypeChecker ), "Disable type checking and inference" ;
   "--disable-interp",  Arg.Unit (fun () -> comp_disable Interpreter ), "Disable interpreter" ;
-
+  
   "--disable-unicode", Arg.Unit (fun () -> debug_options := {!debug_options with unicode = false} ), "Disable unicode printing" ;
   "--enable-annot",    Arg.Unit (fun () -> debug_options := {!debug_options with pr_ann  = true} ),  "Enable printing of type annotations" ;
   "--print-var-full",  Arg.Unit (fun () -> debug_options := {!debug_options with var_output = PrVarBoth} ), "Print names and indexes of variables" ;
@@ -50,7 +65,7 @@ let parseArgs () =
 let parse file =
   let readme,writeme = Unix.pipe () in
   ignore (Unix.create_process
-      "/usr/bin/cpp" [|"/usr/bin/cpp" ; "-w" ; "-include" ; "lib/primitives.fz" ; file |]
+      "/usr/bin/cpp" [|"/usr/bin/cpp" ; "-w" ; "-I" ; "lib" ; "-include" ; "primitives.fz" ; file |]
       Unix.stdin writeme Unix.stderr);
   Unix.close writeme;
   let pi = Unix.in_channel_of_descr readme in
@@ -64,9 +79,22 @@ let parse file =
 
 (* Main must be db_source -> fuzzy string *)
 let check_main_type ty =
+  let (dbsizeArg, epsArg, fnArg) = !programArgs in
+  let ty = match ty,dbsizeArg with
+    | ty, None -> ty
+    | TyLollipop (TyPrim PrimInt, _, ty), Some _ -> ty
+    | _, _ -> TyPrim PrimUnit in
+  let ty = match ty,epsArg with
+    | ty, None -> ty
+    | TyLollipop (TyPrim PrimNum, _, ty), Some _ -> ty
+    | _, _ -> TyPrim PrimUnit in
+  let ty = match ty,fnArg with
+    | ty, None -> ty
+    | TyLollipop (TyPrim PrimString, _, ty), Some _ -> ty
+    | _, _ -> TyPrim PrimUnit in
   match ty with
-  | TyPrim PrimString -> ()
-  | _ -> main_error dp "The type of the program must be string"
+    | TyPrim PrimString -> ()
+    | _ -> main_error dp "The type of the program is wrong"
 
 let type_check program =
   let ty = Tycheck.get_type false program  in
@@ -115,7 +143,18 @@ let main () =
     (* Set up Randomness *)
     (* Random.init 1; *)
     Random.self_init ();
-    let outputStr = Interpreter.run_interp program Prim.prim_list in
+    let di = Support.FileInfo.dummyinfo in
+    let (dbsizeArg, epsArg, fnArg) = !programArgs in
+    let program = match dbsizeArg with
+      | None -> program
+      | Some dbSize -> TmApp(di, program, TmPrim(di, PrimTInt dbSize)) in
+    let program = match epsArg with
+      | None -> program
+      | Some eps -> TmApp(di, program, TmPrim(di, PrimTNum eps)) in
+    let program = match fnArg with
+      | None -> program
+      | Some fn -> TmApp(di, program, TmPrim(di, PrimTString fn))
+    in let outputStr = Interpreter.run_interp program Prim.prim_list in
     main_info dp "The result of the program: %s" outputStr;
   ()
 

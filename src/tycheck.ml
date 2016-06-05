@@ -394,6 +394,11 @@ module TypeSub = struct
     | TyPrim1 (Prim1Bag, ty)   -> return ty
     | _                        -> fail i @@ WrongShape (ty, "bag")
 
+  let check_vector_shape i ty =
+    match ty with
+    | TyPrim1 (Prim1Vector, ty) -> return ty
+    | _                         -> fail i @@ WrongShape (ty, "vector")
+
   let check_tensor_shape i ty =
     match ty with
     | TyTensor(ty1, ty2) -> return (ty1, ty2)
@@ -475,6 +480,14 @@ let rec type_of (t : term) : (ty * si list) checker  =
   
   | TmBag(i, ty, tmlst) -> 
     check_bag_shape i ty >>= fun ity ->
+    mapM (fun tm -> 
+      type_of tm >>= fun (aty, _) ->
+      check_type_sub i aty ity) tmlst >>
+    get_ctx_length >>= fun len ->
+    return (ty, zeros len)
+    
+  | TmVector(i, ty, tmlst) -> 
+    check_vector_shape i ty >>= fun ity ->
     mapM (fun tm -> 
       type_of tm >>= fun (aty, _) ->
       check_type_sub i aty ity) tmlst >>

@@ -30,6 +30,8 @@ open Print
    itself.
 *)
 
+let rzFileName = ref "redZoneTemp"
+
 let di = dummyinfo
 
 module Creation = struct
@@ -51,6 +53,9 @@ module Creation = struct
   let exBag name tb = match tb with 
     | TmBag(_i, _ty, tlst) -> return tlst
     | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a bag but found %a" name pp_term tb
+  let exVector name tb = match tb with 
+    | TmVector(_i, _ty, tlst) -> return tlst
+    | _ -> fail @@ pp_to_string "** Primitive ** " "%s expected a vector but found %a" name pp_term tb
   let exPair ex1 ex2 name tp = match tp with 
     | TmPair(_i, t1, t2) -> ex1 name t1 >>= fun v1 ->
                             ex2 name t2 >>= fun v2 ->
@@ -73,18 +78,19 @@ module Creation = struct
   let mkInt i n    = TmPrim (i, PrimTInt n)
   let mkString i s = TmPrim (i, PrimTString s)
   let mkBag i (ty, l) = TmBag (i, ty, l)
+  let mkVector i (ty, l) = TmVector (i, ty, l)
   let mkPair mk1 mk2 i (t1, t2) = TmPair (i, mk1 i t1, mk2 i t2)
   let mkAny _i t   = t
   let mkUnit i _   = TmPrim (i, PrimTUnit)
   let nb_tyvar n = {b_name = n; b_type = BiTyVar; b_size = -1; b_prim = false;}
 
-  let rec mkList mkA ty i lst = 
+  let rec mkList mkA i (ty, lst) = 
     let lsttype = TyMu({b_name = "XX"; b_type = BiTyVar; b_size = -1; b_prim = false;}, TyUnion
             (TyPrim PrimUnit, TyTensor(ty, TyVar
                 ({v_index = 0; v_name = "XX"; v_size = -1; v_type = BiTyVar;})))) in
     match lst with
     | [] -> TmFold(i, lsttype, TmLeft(i, TmPrim(i, PrimTUnit), TyTensor(ty, lsttype)))
-    | x::xs -> TmFold(i, lsttype, TmRight(i, TmPair(i, mkA i x, mkList mkA ty i xs), TyPrim PrimUnit))
+    | x::xs -> TmFold(i, lsttype, TmRight(i, TmPair(i, mkA i x, mkList mkA i (ty, xs)), TyPrim PrimUnit))
   
   (* The fun_of_*_arg* functions are short hands for making the primitives easily *)
   let fun_of_no_args_with_type_i
@@ -317,13 +323,46 @@ let rec intToPeanoFun
 
 
 (*****************************************************************************)
+(* Here are some helpers for file and string parsing. *)
+let fileLines (maxLines : int) (filename : string) = 
+  let lines = ref [] in
+  let chan = open_in filename in
+  try
+    for i=1 to maxLines; do
+      lines := input_line chan :: !lines
+    done;
+    close_in chan;
+    List.rev !lines
+  with End_of_file ->
+    close_in chan;
+    List.rev !lines
+
+
+let rec typeToMaker (i : info) (ty : ty) : (string -> term) interpreter = match ty with
+  | TyPrim PrimNum  -> return (fun s -> mkNum i (float_of_string s))
+  | TyPrim PrimInt  -> return (fun s -> mkInt i (int_of_string s))
+  | TyPrim PrimUnit -> return (mkUnit i)
+  | TyPrim PrimBool -> return (fun s -> mkBool i (bool_of_string s))
+  | TyPrim PrimString   -> return (mkString i)
+  | TyPrim PrimClipped  -> return (fun s -> mkClipped i (float_of_string s))
+  | TyPrim1 (Prim1Bag, t) -> typeToMaker i t >>= fun mker ->
+        return (fun s -> mkBag i (ty, List.map mker (Str.split (Str.regexp "[ \t]+") s)))
+  | TyPrim1 (Prim1Vector, t) -> typeToMaker i t >>= fun mker ->
+        return (fun s -> mkVector i (ty, List.map mker (Str.split (Str.regexp "[ \t]+") s)))
+(*  | TyTensor (t1, t2) ->
+        typeToMaker i t1 >>= fun mk1 ->
+        typeToMaker i t2 >>= fun mk2 ->
+        return (fun s -> mkPair mk1 mk2 i (Str.split (Str.regexp "[ \t]+") s))*)
+  | _ -> fail @@ pp_to_string "" "**Primitive** unsupported read type: %a." pp_type ty
+
+(*****************************************************************************)
 (* Here we have specific helper functions for specific primitives. *)
 
 let assertFun
   (s : string)
   (b : bool)
   : unit = 
-    assertionMsg di "%s: %s" s (if b then "PASS" else "FAIL"); ()
+    ignore (assertionMsg di "%s: %s" s (if b then "PASS" else "FAIL"))
 
 let assertEqFun
   (s : string)
@@ -333,7 +372,7 @@ let assertEqFun
     let res = if Syntax.tmEq t1 t2 
               then "PASS"
               else pp_to_string "FAIL " "(%a != %a)" pp_term t1 pp_term t2
-    in assertionMsg di "%s: %s" s res; ()
+    in ignore (assertionMsg di "%s: %s" s res)
 
 let tyCheckFuzzFun
   (sens : float)
@@ -370,11 +409,11 @@ let runRedZone
   (f : term)
   : term interpreter =
     onlyInFullEval "runRedZone" (return ()) >>
-    let genFailResult s = begin 
-        match ty with
-            | TyUnion(_, aty) -> return (TmLeft(di, TmPrim(di, PrimTString s), aty))
-            | _ -> fail @@ pp_to_string "**Primitive** " "runRedZone found an unexpected return type: %a" pp_type ty
-        end in
+    (match ty with
+      | TyUnion(_, aty) -> return aty
+      | _ -> fail @@ pp_to_string "**Primitive** " "runRedZone found an unexpected return type: %a" pp_type ty
+    ) >>= fun outty ->
+    let genFailResult s = return (TmLeft(di, TmPrim(di, PrimTString s), outty)) in
     getDB >>= fun db ->
     message 3 "--- RunRedZone: Before Partial evaluation: %a" pp_term f;
     inPartial (Interpreter.goUnderLambda f) >>= fun pf ->
@@ -397,7 +436,13 @@ let runRedZone
       match succ with
         | Error s -> genFailResult s
         | Ok n -> attemptRedZone n >>= fun succ ->
-                  if succ then Interpreter.interp (TmApp(di, pf, db)) >>= fun a -> return (TmRight(di, a, TyPrim PrimString))
+                  if succ then begin
+                    match Fuzztoml.runCompiled (!rzFileName) pf db outty with
+                    | Error s -> genFailResult s
+                    | Ok res -> typeToMaker di outty >>= fun mker -> 
+                                return (TmRight(di, mker res, TyPrim PrimString))
+                  end
+(*                  if succ then Interpreter.interp (TmApp(di, pf, db)) >>= fun a -> return (TmRight(di, a, TyPrim PrimString))*)
                   else genFailResult "Database is all used up"
     end
 
@@ -411,14 +456,14 @@ let showBagFun
 let bagsumLFun
   (n : int)
   (b : term list)
-  : (float list) interpreter =
+  : (ty * float list) interpreter =
     let rec sumUp xs ys = match xs,ys with
             | x::xs,y::ys -> (x +. y)::sumUp xs ys
             | xs,[] -> xs
             | [],ys -> ys
     in 
     mapM (fun t -> Interpreter.interp t >>= exList exNum "bagsumL") b >>= fun numlstlst ->
-    return @@ (List.fold_left sumUp [] numlstlst)
+    return @@ (TyPrim PrimNum, List.fold_left sumUp [] numlstlst)
 
 let rec bagfoldlFun
   (f : term)
@@ -452,7 +497,9 @@ let bagmapFun
   (f : term)
   (b : term list)
   : (ty * term list) interpreter = 
-    return (ty, List.map (fun tm -> TmApp(di, f, tm)) b)
+    mapM (fun t -> Interpreter.interp (TmApp(di, f, t))) b >>= fun tmlst ->
+    return (ty, tmlst)
+    (*return (ty, List.map (fun tm -> TmApp(di, f, tm)) b)*)
 
 let bagsplitFun
   (oty : ty)
@@ -485,12 +532,12 @@ let expMechFun
   : term interpreter = 
     mapM (fun r -> Interpreter.interp (TmApp(di, TmApp(di, quality, r), db)) 
             >>= exNum "expMech"
-            >>= fun q -> return (r, abs_float q +. Math.lap (k /. eps))) rbag >>= fun problist ->
+            >>= fun q -> return (r, q +. Math.lap (k /. eps))) rbag >>= fun problist ->
 (*    Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
       "--- expMech: Probabilities are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) problist));*)
     let (res, _i) = List.fold_left 
-            (fun best r -> if snd r > snd best then r else best)
-            (mkUnit di (), neg_infinity) problist in
+            (fun best r -> if abs_float (snd r) > abs_float (snd best) then r else best)
+            (mkUnit di (), 0.0) problist in
     return res
 
 (* expMechWithScoreFun : num[s] -> num[k] -> (R -> DB -o[k] num) -> R bag -> DB -o[s] fuzzy (R, num) *)
@@ -503,12 +550,12 @@ let expMechWithScoreFun
   : (term * float) interpreter = 
     mapM (fun r -> Interpreter.interp (TmApp(di, TmApp(di, quality, r), db)) 
             >>= exNum "expMechWithScore"
-            >>= fun q -> return (r, abs_float q +. Math.lap (k /. eps))) rbag >>= fun problist ->
+            >>= fun q -> return (r, q +. Math.lap (k /. eps))) rbag >>= fun problist ->
 (*    Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
       "--- expMechWithScore: Probabilities are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) problist));*)
     let (res, i) = List.fold_left 
-            (fun best r -> if snd r > snd best then r else best)
-            (mkUnit di (), neg_infinity) problist in
+            (fun best r -> if abs_float (snd r) > abs_float (snd best) then r else best)
+            (mkUnit di (), 0.0) problist in
     return (res, i)
 
 let expMechPreWithScoreFun
@@ -523,12 +570,12 @@ let expMechPreWithScoreFun
     Interpreter.interp (TmApp(di, preprocess, db)) >>= fun intermediateTerm ->
     mapM (fun r -> Interpreter.interp (TmApp(di, TmApp(di, quality, r), intermediateTerm)) 
             >>= exNum "expMechWithScore"
-            >>= fun q -> return (r, abs_float q +. Math.lap (j *. k /. eps))) rbag >>= fun problist ->
+            >>= fun q -> return (r, q +. Math.lap (j *. k /. eps))) rbag >>= fun problist ->
 (*    Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
       "--- expMechWithScore: Probabilities are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) problist));*)
     let (res, i) = List.fold_left 
-            (fun best r -> if snd r > snd best then r else best)
-            (mkUnit di (), neg_infinity) problist in
+            (fun best r -> if abs_float (snd r) > abs_float (snd best) then r else best)
+            (mkUnit di (), 0.0) problist in
     return (res, i)
 
 (* expMechUnsafeFun : num[s] -> num[k] -> int -> (DB -o[k] ((R,num) bag)) -> DB -o[s] fuzzy R *)
@@ -547,46 +594,25 @@ let expMechUnsafeFun
   : term interpreter = 
     Interpreter.interp (TmApp(di, quality, db)) >>= exBag "expMechUnsafe" >>= fun resbag ->
     mapM (fun t -> Interpreter.interp t >>= exPair exAny exNum "expMechUnsafe") resbag >>= fun rnumlist ->
-    let problist = List.map (fun (r,q) -> (r, abs_float q +. Math.lap (k /. eps /. (float_of_int rmod)))) rnumlist in
+    let problist = List.map (fun (r,q) -> (r, q +. Math.lap (k /. eps /. (float_of_int rmod)))) rnumlist in
 (*    Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
       "--- expMechUnsafe: Scores are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) rnumlist));
     Support.Error.message 0 Support.Options.Interpreter Support.FileInfo.dummyinfo 
       "--- expMechUnsafe: Probabilities are: %s" (String.concat "," (List.map (fun x -> string_of_float (snd x)) problist));*)
     let (res, _i) = List.fold_left 
-            (fun best r -> if snd r > snd best then r else best)
-            (mkUnit di (), neg_infinity) problist in
+            (fun best r -> if abs_float (snd r) > abs_float (snd best) then r else best)
+            (mkUnit di (), 0.0) problist in
     return res
 
 
 (*****************************************************************************)
-(* Here are some helpers for file and string parsing. *)
-let fileLines (filename : string) = 
-  let lines = ref [] in
-  let chan = open_in filename in
-  try
-    while true; do
-      lines := input_line chan :: !lines
-    done; !lines
-  with End_of_file ->
-    close_in chan;
-    List.rev !lines
-
-
-let typeToMaker (i : info) (ty : ty) : (string -> term) interpreter = match ty with
-  | TyPrim PrimNum  -> return (fun s -> mkNum i (float_of_string s))
-  | TyPrim PrimInt  -> return (fun s -> mkInt i (int_of_string s))
-  | TyPrim PrimUnit -> return (mkUnit i)
-  | TyPrim PrimBool -> return (fun s -> mkBool i (bool_of_string s))
-  | TyPrim PrimString   -> return (mkString i)
-  | TyPrim PrimClipped  -> return (fun s -> mkClipped i (float_of_string s))
-  | _ -> fail @@ pp_to_string "" "**Primitive** unsupported read type: %a." pp_type ty
-
 (* Here are the *fromFile primitives. *)
 let bagFromFileFun
   (oty : ty)
+  (maxsize : int)
   (fn : string)
   : (ty * term list) interpreter = 
-    let lines = fileLines fn in
+    let lines = fileLines maxsize fn in
     (match oty with
       | TyPrim1 (Prim1Bag, subty)   -> return subty
       | _   -> fail @@ pp_to_string "" "**Primitive** bagFromFile found a weird type %a." pp_type oty
@@ -596,9 +622,10 @@ let bagFromFileFun
 
 let listFromFileFun
   (oty : ty)
+  (maxsize : int)
   (fn : string)
   : term interpreter = 
-    let lines = fileLines fn in
+    let lines = fileLines maxsize fn in
     (match oty with
       | TyMu (_, TyUnion (TyPrim PrimUnit, TyTensor (subty, TyVar _))) -> return subty
       | _   -> fail @@ pp_to_string "" "**Primitive** listFromFile found a weird type %a." pp_type oty
@@ -610,19 +637,120 @@ let listFromFileFun
 
 let listbagFromFileFun
   (oty : ty)
+  (maxsize : int)
   (fn : string)
   (rexp : string)
   : (ty * term list) interpreter = 
-    let lines = fileLines fn in
+    let lines = fileLines maxsize fn in
     (match oty with
       | TyPrim1 (Prim1Bag, TyMu (_, TyUnion (TyPrim PrimUnit, TyTensor (subty, TyVar _)))) -> return subty
-      | _   -> fail @@ pp_to_string "" "**Primitive** baglistFromFile found a weird type %a." pp_type oty
+      | _   -> fail @@ pp_to_string "" "**Primitive** listbagFromFile found a weird type %a." pp_type oty
     ) >>= fun subty ->
     typeToMaker di subty >>= fun wordFun ->
     let lineFun line = List.fold_right (fun v fzlst -> TmFold (di, oty, TmRight (di, TmPair (di, v, fzlst), TyPrim PrimUnit)))
                             (List.map wordFun (Str.split (Str.regexp rexp) line))  (*"[ \t]+"*)
                             (TmFold (di, oty, TmLeft (di, TmPrim (di, PrimTUnit), subty)))
     in return (oty, List.map lineFun lines)
+
+
+let vectorbagFromFileFun
+  (oty : ty)
+  (maxsize : int)
+  (fn : string)
+  (rexp : string)
+  : (ty * term list) interpreter = 
+    let lines = fileLines maxsize fn in
+    (match oty with
+      | TyPrim1 (Prim1Bag, TyPrim1 (Prim1Vector, subty)) -> return subty
+      | _   -> fail @@ pp_to_string "" "**Primitive** vectorbagFromFile found a weird type %a." pp_type oty
+    ) >>= fun subty ->
+    typeToMaker di subty >>= fun wordFun ->
+    let lineFun line = mkVector di (TyPrim1 (Prim1Vector, subty), List.map wordFun (Str.split (Str.regexp rexp) line))
+    in return (oty, List.map lineFun lines)
+
+
+
+let vindexFun
+  (def : term)
+  (i : int)
+  (v : term list)
+  : term = 
+    let rec nth i lst = match lst with
+            | [] -> def
+            | x::xs -> if i <= 0 then x else nth (i-1) xs
+    in nth i v
+
+let vunconsFun
+  (oty : ty)
+  (def : term)
+  (v : term list)
+  : (term * (ty * term list)) interpreter = 
+    match v with
+    | [] -> return (def, (oty, []))
+    | x::xs -> return (x, (oty, xs))
+
+let listToVectorFun
+  (oty : ty)
+  (lst : term list)
+  : (ty * term list) interpreter = return (oty, lst)
+
+let vectorToListFun
+  (oty : ty)
+  (lst : term list)
+  : (ty * term list) interpreter = 
+    (match oty with
+      | TyMu (_, TyUnion (TyPrim PrimUnit, TyTensor (subty, TyVar _))) -> return subty
+      | _   -> fail @@ pp_to_string "" "**Primitive** vectorToList found a weird type %a." pp_type oty
+    ) >>= fun subty -> return (subty, lst)
+
+
+let bagsumVFun
+  (oty : ty)
+  (n : int)
+  (b : term list)
+  : (ty * term list) interpreter =
+    let rec sumUp xs ys = match xs,ys with
+            | x::xs,y::ys -> (x +. y)::sumUp xs ys
+            | xs,[] -> xs
+            | [],ys -> ys
+    in 
+    mapM (fun t -> Interpreter.interp t >>= exVector "bagsumV" >>= mapM 
+            (fun t' -> Interpreter.interp t' >>= exNum "bagsumV")) b >>= fun numlstlst ->
+    return (oty, List.map (mkNum di) (List.fold_left sumUp [] numlstlst))
+
+
+let vectorIPFun
+  (oty : ty)
+  (lst1 : term list)
+  (lst2 : term list)
+  : float interpreter = 
+  mapM (fun t -> Interpreter.interp t >>= exNum "vsum") lst1 >>= fun lst1' -> 
+  mapM (fun t -> Interpreter.interp t >>= exNum "vsum") lst2 >>= fun lst2' -> 
+  let rec f l1 l2 = match l1, l2 with
+                    | x::xs, y::ys -> (x *. y) +. (f xs ys)
+                    | _,_   -> 0.0
+  in return (f lst1' lst2')
+
+let vperformAtFun
+  (oty : ty)
+  (i : int)
+  (f : term)
+  (v : term list)
+  : (ty * term list) interpreter =
+    if i >= List.length v || i < 0 then
+      fail @@ pp_to_string "" "**Primitive** vperformAt had an out-of-bounds list index %a." pp_type oty
+    else
+      let rec inner i l = match i,l with
+        | _,[] -> return []
+        | 0,x::xs -> Interpreter.interp (TmApp(di, f, x)) >>= fun x' -> return (x'::xs)
+        | _,x::xs -> inner (i-1) xs >>= fun xs' -> return (x::xs')
+      in inner i v >>= fun res -> return (oty, res)
+
+let showVecFun
+  (v : term list)
+  : string interpreter =
+    mapM (fun t -> Interpreter.interp t >>= exString "showVec") v >>= fun strList ->
+    return @@ String.concat "," strList
 
 
 
@@ -656,8 +784,6 @@ let prim_list : (string * primfun) list = [
 ("_mul", fun_of_2args "_mul" exNum exNum mkNum ( *. ));
 ("_div", fun_of_2args "_div" exNum exNum mkNum ( /. ));
 
-("div2", fun_of_1arg "div2" exNum mkNum (fun n -> n /. 2.0));
-("div3", fun_of_1arg "div3" exNum mkNum (fun n -> n /. 3.0));
 ("_exp", fun_of_1arg "_exp" exNum mkNum ( exp ));
 ("_abs", fun_of_1arg "_abs" exNum mkNum ( abs_float ));
 ("cswp", fun_of_1arg "cswp" (exPair exNum exNum) (mkPair mkNum mkNum) (fun (x,y) -> if x < y then (x,y) else (y,x)));
@@ -680,16 +806,17 @@ let prim_list : (string * primfun) list = [
 ("showNum", fun_of_1arg "showNum" exNum mkString ( fun n -> if n = floor n then string_of_int (truncate n) else string_of_float n ));
 ("showInt", fun_of_1arg "showInt" exInt mkString ( string_of_int ));
 ("showBag", fun_of_1arg_i "showBag" exBag mkString showBagFun);
+("showVec", fun_of_1arg_i "showVec" exVector mkString showVecFun);
 
 (* Testing Utilities *)
-("assert",   fun_of_2args "assert"   exString exBool mkUnit assertFun);
+("_assert",   fun_of_2args "_assert"   exString exBool mkUnit assertFun);
 ("assertEq", fun_of_3args "assertEq" exString exAny exAny mkUnit assertEqFun);
-("print",   fun_of_1arg "print"   exString mkUnit (fun s -> printMsg di "%s" s ; ()));
+("print",   fun_of_1arg "print"   exString mkUnit (fun s -> ignore (printMsg di "%s" s)));
 
 (* Probability monad operations *)
 ("_return", fun_of_1arg_i "_return" exAny mkAny (fun x -> onlyInFullEval "return" (return x)));
 
-("loadDB", fun_of_2args_i "loadDB" exAny (exPair exNum exNum) mkUnit storeDB);
+("loadDB", fun_of_2args_i "loadDB" exFun (exPair exNum exNum) mkUnit storeDB);
 
 (* Red zone activation primitives *)
 ("tyCheckFuzz", fun_of_2args_i "tyCheckFuzz" exNum exAny mkAny tyCheckFuzzFun);
@@ -713,7 +840,7 @@ let prim_list : (string * primfun) list = [
 
 ("bagsum", fun_of_1arg_i "bagsum" exBag mkNum 
   (fun l -> mapM (fun t -> Interpreter.interp t >>= exNum "bagsum") l >>= fun l' -> return (List.fold_left (+.) 0.0 l')));
-("bagsumL", fun_of_2args_i "bagsumL" exInt exBag (mkList mkNum (TyPrim PrimNum)) bagsumLFun);
+("bagsumL", fun_of_2args_i "bagsumL" exInt exBag (mkList mkNum) bagsumLFun);
 ("bagPairOperate", fun_of_3args_with_type_i "bagPairOperate" exFun exFun exBag (mkPair mkAny mkAny) bagPairOperateFun);
 
 ("bagsplit", fun_of_2args_with_type_i "bagsplit" exFun exBag (mkPair mkBag mkBag) bagsplitFun);
@@ -729,9 +856,24 @@ let prim_list : (string * primfun) list = [
 ("expMechUnsafe", fun_of_5args_i "expMechUnsafe" exNum exNum exInt exFun exAny mkAny expMechUnsafeFun);
 
 (* Load data from external file *)
-("bagFromFile",  fun_of_1arg_with_type_i "bagFromFile"  exString mkBag bagFromFileFun);
-("listFromFile", fun_of_1arg_with_type_i "listFromFile" exString mkAny listFromFileFun);
-("listbagFromFile", fun_of_2args_with_type_i "listbagFromFile" exString exString mkBag listbagFromFileFun);
+("bagFromFile",  fun_of_2args_with_type_i "bagFromFile"  exInt exString mkBag bagFromFileFun);
+("listFromFile", fun_of_2args_with_type_i "listFromFile" exInt exString mkAny listFromFileFun);
+("listbagFromFile", fun_of_3args_with_type_i "listbagFromFile" exInt exString exString mkBag listbagFromFileFun);
+
+
+
+("vsize", fun_of_1arg "vsize" exVector mkInt ( List.length ));
+("vmap", fun_of_2args_with_type_i "vmap" exFun exVector mkVector bagmapFun);
+("vsum", fun_of_1arg_i "vsum" exVector mkNum 
+  (fun l -> mapM (fun t -> Interpreter.interp t >>= exNum "vsum") l >>= fun l' -> return (List.fold_left (+.) 0.0 l')));
+("vindex",  fun_of_3args "vindex"  exAny exInt exVector mkAny vindexFun);
+("vuncons", fun_of_2args_with_type_i "vuncons" exAny exVector (mkPair mkAny mkVector) vunconsFun);
+("vectorbagFromFile", fun_of_3args_with_type_i "vectorbagFromFile" exInt exString exString mkBag vectorbagFromFileFun);
+("listToVector", fun_of_1arg_with_type_i "listToVector" (exList exAny) mkVector listToVectorFun);
+("vectorToList", fun_of_1arg_with_type_i "vectorToList" exVector (mkList mkAny) vectorToListFun);
+("bagsumV", fun_of_2args_with_type_i "bagsumV" exInt exBag mkVector bagsumVFun);
+("vectorIP", fun_of_2args_with_type_i "vectorIP" exVector exVector mkNum vectorIPFun);
+("vperformAt", fun_of_3args_with_type_i "vperformAt" exInt exFun exVector mkVector vperformAtFun);
 
 ]
 
